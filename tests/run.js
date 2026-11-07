@@ -27,7 +27,7 @@ const game=read("game.js");
 t("scoring: +100 on correct, no points + original SFX on wrong",()=>{ok(/if\(ok\)\{score\+=100/.test(game));ok(/else\{PlatoSfx\.wrong\(\)/.test(game));const sfx=read("sfx.js");ok(/createOscillator/.test(sfx)&&!/\.(mp3|wav|ogg)/.test(sfx),"sfx must be synthesized")});
 t("no ads / trackers / CDN",()=>{for(const f of ["index.html","game.js","shapes.js","sfx.js","sw.js","style.css","manifest.webmanifest"]){const s=read(f).toLowerCase();for(const bad of ["adsbygoogle","adsense","doubleclick","googletagmanager","google-analytics","gtag(","admob","applovin","unityads","facebook.net","cdn.","https://","http://"])ok(!s.includes(bad),f+" has "+bad)}});
 t("service worker caches every bundled asset and they exist",()=>{const sw=read("sw.js");const list=JSON.parse(sw.match(/const SHELL=(\[.*?\]);/)[1]);
- for(const a of ["assets/intro.mp4","assets/intro-music.mp3","assets/cave-wall.jpg","game.js?v=3","shapes.js?v=3","sfx.js?v=1","style.css?v=2","index.html"])ok(list.includes(a),a);
+ for(const a of ["assets/intro.mp4","assets/intro-music.mp3","assets/cave-wall.jpg","game.js?v=4","shapes.js?v=4","sfx.js?v=1","style.css?v=2","index.html"])ok(list.includes(a),a);
  for(const a of list)if(a!=="./")ok(fs.existsSync(path.join(R,a.split("?")[0])),"missing "+a);const html=read("index.html");for(const m of html.matchAll(/(?:src|href)="([^"]+)"/g))ok(list.includes(m[1])||m[1].startsWith("icons/")&&list.includes(m[1])||m[1]==="manifest.webmanifest","uncached "+m[1])});
 t("update path: version.json never cached, pending build, silent fail",()=>{const sw=read("sw.js");ok(/cache:"no-store"/.test(sw));ok(!/"version\.json"\s*[,\]]/.test(sw.match(/const SHELL=(\[.*?\]);/)[1]));ok(/pending/.test(sw)&&/silent/.test(sw));ok(JSON.parse(read("version.json")).build)});
 t("manifest standalone/fullscreen",()=>{const m=JSON.parse(read("manifest.webmanifest"));ok(m.display==="fullscreen"&&m.display_override.includes("standalone"))});
@@ -39,7 +39,7 @@ for(const name of ["ball","cube","house","heart","tower"])t("a "+name,()=>ok(S.a
 t("wooden eagle is volumetric and accepted",()=>{const bird=S.SHAPES.find(s=>s.name==="bird");ok(bird.mesh.f.length>500);ok(S.isCorrect(bird,"wooden eagle"));ok(S.isCorrect(bird,"eagle"))});
 t("cone and pyramid have distinct projected bases throughout animation",()=>{const c=S.SHAPES[2],p=S.SHAPES[4];for(const time of [0,1000,4000,8000]){const cv=S.displayPose(c,time),pv=S.displayPose(p,time);ok(Math.max(...cv.map(v=>v[1]))>0);ok(JSON.stringify(cv)!==JSON.stringify(pv))}});
 
-t("version bumped to build 3 with cache-busted changed scripts",()=>{ok(JSON.parse(read("version.json")).build==="3");const html=read("index.html");ok(html.includes('src="game.js?v=3"')&&html.includes('src="shapes.js?v=3"')&&html.includes('src="sfx.js?v=1"'))});
+t("version bumped to build 4 with cache-busted changed scripts",()=>{ok(JSON.parse(read("version.json")).build==="4");const html=read("index.html");ok(html.includes('src="game.js?v=4"')&&html.includes('src="shapes.js?v=4"')&&html.includes('src="sfx.js?v=1"'))});
 t("cave wall image unchanged",()=>ok(sha("assets/cave-wall.jpg")==="5916d37cdf7759752ae694807358018d06d7c99b0aebd9e0d1b1697491e315d0"));
 t("Skip clears the previous fallback timer before assigning a new one",()=>{const body=game.match(/function trySkip\(\)\{[\s\S]*?\n function|function trySkip\(\)\{[\s\S]*?resumeIntro\(\)\}\}/)[0];
  const iClear=body.indexOf("clearTimeout(seekTimer)"),iSet=body.indexOf("seekTimer=setTimeout");ok(iClear>=0&&iSet>iClear,"clear before set");
@@ -67,8 +67,14 @@ t("rapid Skips leave exactly one live fallback; remembered skip retries once see
  // later seek fails and lands on a zero-time / undecoded frame: must resume, never pause black
  video.currentTime=0;video.readyState=0;const p0=video.pauses;fire("seeked");ok(api.s.introState==="playing"&&!api.s.skipPending&&video.pauses===p0&&!video.paused&&timers.size===0,"resumed, no black hold");
  api.toHold();ok(api.s.introState==="playing","toHold refuses zero-time frame");
+ // Empty seekable ranges can persist even once decoded data and finite duration exist.
+ api.startIntro();video.duration=NaN;video.readyState=1;video.seekable={length:0,end:()=>0};api.trySkip();ok(api.s.skipWanted);
+ video.duration=25.36;video.readyState=2;fire("canplay");ok(api.s.skipPending&&video.currentTime>23,"empty ranges fallback seeks");fire("seeked");ok(api.s.introState==="hold","decoded empty-range hold");
+ api.startIntro();
  // and the deferred path also clears a previous timer
- video.readyState=4;api.trySkip();const before=timers.size;video.seekable={length:0,end:()=>0};api.trySkip();ok(before===1&&timers.size===0,"deferring clears the old fallback")});
+ video.readyState=4;api.trySkip();const before=timers.size;video.seekable={length:0,end:()=>0};video.readyState=0;api.trySkip();ok(before===1&&timers.size===0,"deferring clears the old fallback")});
+t("stone trio have independent ramps and mark vocabularies",()=>{const om=new Function("return "+game.match(/const OBJ_MATS=(\{[\s\S]*?\});/)[1])(),m=new Function("return "+game.match(/const MATS=(\{[\s\S]*?\});/)[1])();const ids=["cube","pyramid","tower"].map(n=>om[n][0]);ok(new Set(ids).size===3);ok(new Set(ids.map(id=>JSON.stringify(m[id].c))).size===3);ok(new Set(ids.map(id=>m[id].tx)).size===3);for(const id of ids)ok(game.includes('if(kind==="'+m[id].tx+'")'));ok(!ids.some(id=>m[id].tx==="stone"))});
+t("every dynamic canvas radius is explicitly clamped",()=>{for(const line of game.split("\n"))for(const m of line.matchAll(/(?:arc|ellipse|createRadialGradient)\(([^;]*)/g))ok(m[1].includes("radius("),line);ok(game.includes("radius(Math.min(W,H-150)*0.27)"))});
 t("ice cream: accepted names, cream scoop distinct from ridged wafer cone, silhouette unlike plain cone",()=>{const ic=S.SHAPES.find(s=>s.name==="ice cream"),cone=S.SHAPES.find(s=>s.name==="cone");
  for(const n of ["ice cream","Ice cream cone","icecream","cone of ice cream","an ice cream"])ok(S.isCorrect(ic,n),n);ok(!S.isCorrect(ic,"cone"));
  ok(Array.isArray(ic.mesh.t)&&ic.mesh.t.length===ic.mesh.f.length,"per-face parts");const parts=new Set(ic.mesh.t);ok(parts.has(0)&&parts.has(1),"wafer + scoop parts");
@@ -81,6 +87,8 @@ t("reveals use per-substance materials, not one universal wood grain (bird keeps
  ok(objs.bird[0]==="wood","bird is wood");const wood=S.SHAPES.filter(s=>objs[s.name][0]==="wood").length;ok(wood<=6,"wood-first shapes "+wood);
  ok(objs.ball[0]!=="wood"&&objs.cube[0]!=="wood"&&objs.ball[0]!==objs.cube[0],"ball/cube distinct, not wood");ok(new Set(Object.values(objs).map(x=>x[0])).size>=15,"many substances");
  ok(/if\(kind==="wood"\)/.test(game)&&!/for\(let i=0;i<220;i\+\+\)[^\n]*pg\./.test(game),"wood grain is only a material brush, not a pg overlay");ok(/feather incisions/.test(game))});
+t("legacy completeness does not depend on a future worker SHELL",()=>{const body=read("sw.js").split("async function cacheComplete")[1].split("async function complete")[0];ok(!/for\(const u of SHELL\)/.test(body));ok(body.includes("LEGACY_CORE")&&body.includes('searchParams.get("v")===String(build)'))});
+t("downloads publish a validated staging cache and guard live targets",()=>{const body=read("sw.js").split("async function download")[1].split("async function cleanup")[0];ok(body.indexOf("cacheComplete(stage,build)")<body.indexOf("await caches.delete(PREFIX+build)"));ok(body.indexOf("inUse(m,build)")<body.indexOf("await caches.delete(PREFIX+build)"));ok(body.includes("keys:SHELL")&&body.includes("finally"))});
 t("SW update path keeps Shark pattern and adds session pins",()=>{const sw=read("sw.js");ok(/cache:"no-store"/.test(sw)&&/all-or-nothing/.test(sw)&&/silent/.test(sw)&&/m2\.pending=b/.test(sw));
  ok(/resultingClientId/.test(sw)&&/clients\.matchAll/.test(sw)&&/pins/.test(sw));ok(/c\.match\(r\.url\)\|\|await c\.match\(r\.url,\{ignoreSearch:true\}\)/.test(sw),"exact first")});
 // Execute the actual worker range routine, not a copied implementation.
@@ -93,8 +101,8 @@ for(const rg of ["bytes=99-9","bytes=8-2","bytes=10-","bytes=-0","bytes=-","byte
 await at("offline seek from cached MP4 tail",async()=>{const bytes=fs.readFileSync(path.join(R,"assets/intro.mp4")),start=bytes.length-4096;const r=await ctx.ranged(new Response(bytes,{headers:{"content-type":"video/mp4"}}),"bytes="+start+"-");ok(r.status===206);ok(Buffer.from(await r.arrayBuffer()).equals(bytes.subarray(start)));ok(r.headers.get("content-range")===`bytes ${start}-${bytes.length-1}/${bytes.length}`)});
 
 await at("SW: open tab stays pinned to its build and keeps its cache; next launch takes pending; cache dropped after close",async()=>{
- const store=new Map();const mk=()=>{const m=new Map();return {async match(u,o){const k=typeof u==="string"?new URL(u,"https://p.test/g/sw.js").href:u.url;if(m.has(k))return m.get(k).clone();if(o&&o.ignoreSearch){for(const [kk,v] of m)if(kk.split("?")[0]===k.split("?")[0])return v.clone()}},async put(u,r){m.set(new URL(u,"https://p.test/g/sw.js").href,r)}}};
- const caches={async open(n){if(!store.has(n))store.set(n,mk());return store.get(n)},async has(n){return store.has(n)},async delete(n){return store.delete(n)},async keys(){return [...store.keys()]}};
+ const store=new Map(),deletions=[];let failStageWrite=false;const mk=(name)=>{const m=new Map();return {async match(u,o){const k=typeof u==="string"?new URL(u,"https://p.test/g/sw.js").href:u.url;if(m.has(k))return m.get(k).clone();if(o&&o.ignoreSearch){for(const [kk,v] of m)if(kk.split("?")[0]===k.split("?")[0])return v.clone()}},async keys(){return [...m.keys()].map(url=>({url}))},async put(u,r){if(failStageWrite&&name.includes("-staging-"))throw new Error("simulated storage failure");m.set(new URL(typeof u==="string"?u:u.url,"https://p.test/g/sw.js").href,r)}}};
+ const caches={async open(n){if(!store.has(n))store.set(n,mk(n));return store.get(n)},async has(n){return store.has(n)},async delete(n){deletions.push(n);return store.delete(n)},async keys(){return [...store.keys()]}};
  let remote="2",open=new Set(),netCalls=0;const L={};
  const SHELLf=read("sw.js").match(/const SHELL=(\[.*?\]);/)[1];
  const fetchF=async(req,o)=>{const u=typeof req==="string"?req:req.url;netCalls++;if(/version\.json/.test(u))return new Response(JSON.stringify({build:remote}));return new Response("build"+remote+":"+u.split("/").pop())};
@@ -106,12 +114,32 @@ await at("SW: open tab stays pinned to its build and keeps its cache; next launc
  const get=async(url,clientId,nav,result)=>{const x=ev({request:new Req(url,{mode:nav?"navigate":"no-cors"}),clientId:clientId||"",resultingClientId:result||""});L.fetch(x.e);const r=await x.done();return r?await r.text():null};
  open.add("A");ok((await get("index.html",null,true,"A")).startsWith("build2"),"A launches build 2");
  remote="3";const chk=ev({data:"check"});L.message(chk.e);await chk.done();ok(store.has("platocave-v3"),"build 3 downloaded as pending");
- ok((await get("game.js?v=3","A")).startsWith("build2"),"A still served build 2 before any relaunch");
+ ok((await get("game.js?v=4","A")).startsWith("build2"),"A still served build 2 before any relaunch");
  open.add("B");ok((await get("index.html",null,true,"B")).startsWith("build3"),"new launch B takes pending build 3");
  ok(store.has("platocave-v2"),"old cache kept while A is open");ok((await get("assets/intro.mp4","A")).startsWith("build2"),"A never gets build-3 bytes");
  ok((await get("game.js?v=9","A")).startsWith("build2"),"ignoreSearch fallback stays inside A's pinned cache");
  ok((await get("assets/intro.mp4","B")).startsWith("build3"),"B on build 3");
  open.delete("A");open.add("C");await get("index.html",null,true,"C");ok(!store.has("platocave-v2"),"old cache deleted after A closed");
+ // Simulate an older v2 worker's manifest-less cache and an unpinned already-playing window.
+ open.clear();open.add("LEGACY");const legacy=await caches.open("platocave-v2");
+ for(const u of JSON.parse(SHELLf))await legacy.put(u.replace(/([?]v=)4$/, "$12"),new Response("legacy2:"+u));
+ await c2.setMeta({current:"2"});remote="4";
+ const upgrade=ev({});L.install(upgrade.e);await upgrade.done();let meta=await c2.getMeta();
+ ok(meta.current==="2"&&meta.pending==="4"&&meta.pins.LEGACY==="2","install pins legacy before pending promotion");
+ ok(await c2.complete("2"),"legacy own keys complete");const upgradeAct=ev({});L.activate(upgradeAct.e);await upgradeAct.done();
+ ok(store.has("platocave-v2"),"claim/cleanup preserves legacy");ok((await get("game.js?v=2","LEGACY")).startsWith("legacy2:"),"legacy bytes served");
+ open.add("NEW");ok((await get("index.html",null,true,"NEW")).startsWith("build4"),"new navigation promotes 4");
+ // Rollback download must stage but not replace immutable bytes used by LEGACY.
+ const deleteStart=deletions.length;remote="2";await c2.download("2");ok((await get("game.js?v=2","LEGACY")).startsWith("legacy2:"),"rollback never replaces pinned cache");
+ const goodFetch=c2.fetch;c2.fetch=async()=>new Response("broken",{status:404});let rejected=false;try{await c2.download("2")}catch(_){rejected=true}
+ ok(rejected&&(await get("game.js?v=2","LEGACY")).startsWith("legacy2:"),"failed stage leaves live cache intact");c2.fetch=goodFetch;
+ failStageWrite=true;rejected=false;try{await c2.download("2")}catch(_){rejected=true}failStageWrite=false;
+ ok(rejected&&(await get("game.js?v=2","LEGACY")).startsWith("legacy2:"),"storage failure in staging preserves live target");
+ ok(!deletions.slice(deleteStart).includes("platocave-v2"),"live target never deleted during success, network failure or storage failure");
+ ok(!(await caches.keys()).some(k=>k.includes("staging")),"no leaked staging caches");
+ open.delete("LEGACY");await c2.withMeta(c2.cleanup);ok(!store.has("platocave-v2"),"legacy cache reclaimed only after close");
+ // Restore working build 3 so the pre-existing failure regression stays meaningful.
+ remote="3";await c2.download("3");await c2.setMeta({current:"3"});open.clear();open.add("D");await c2.withMeta(c2.cleanup);
  remote="4";const before=[...store.keys()].sort().join();const bad=c2.fetch;c2.fetch=async(u)=>{if(/version/.test(typeof u==="string"?u:u.url))return new Response(JSON.stringify({build:"4"}));return new Response("x",{status:404})};
  const chk2=ev({data:"check"});L.message(chk2.e);await chk2.done();ok(!store.has("platocave-v4"),"broken update fails silently, all-or-nothing");
  ok((await get("index.html",null,true,"D")).startsWith("build3"),"still the working build")});

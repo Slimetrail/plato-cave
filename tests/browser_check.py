@@ -3,7 +3,7 @@ import asyncio,sys,os,json
 from pathlib import Path
 from playwright.async_api import async_playwright
 U=os.environ.get('PLATO_URL','http://127.0.0.1:19543/')
-OUT=Path('/workspace/plato-cave/game-export/r2-fixes');OUT.mkdir(parents=True,exist_ok=True)
+OUT=Path('/workspace/plato-cave/game-export/r3-fixes');OUT.mkdir(parents=True,exist_ok=True)
 async def main():
   res=[]
   def ok(n,c):res.append((n,bool(c)));print('PASS' if c else 'FAIL',n,flush=True)
@@ -37,6 +37,14 @@ async def main():
       await pg.evaluate('(name)=>{startGame();round=PlatoShapes.SHAPES.findIndex(s=>s.name===name);newRound()}',name)
       await pg.wait_for_timeout(200);await pg.screenshot(path=str(OUT/f"{name.replace(' ','-')}-shadow.png"))
       await pg.evaluate('__plato.submit("x")');await pg.wait_for_timeout(700);await pg.screenshot(path=str(OUT/f"{name.replace(' ','-')}-reveal.png"))
+    # Exercise all material brushes at genuinely short sizes, including caller-supplied negatives.
+    for width,height in [(400,380),(400,120),(400,1)]:
+      await pg.set_viewport_size({'width':width,'height':height})
+      await pg.evaluate("()=>{startGame();for(const sp of PlatoShapes.SHAPES){drawObject(sp,1000,W/2,H/2,Math.min(W,H-150)*.27);drawShadow(sp,1000)}drawWall(1000);round=PlatoShapes.SHAPES.findIndex(s=>s.name==='ice cream');newRound();__plato.submit('x')}")
+      await pg.wait_for_timeout(100)
+      if height==380:await pg.screenshot(path=str(OUT/'short-viewport-400x380.png'))
+      ok(f'all 50 materials draw without IndexSizeError at {width}x{height}',not errs)
+    await pg.set_viewport_size({'width':1280,'height':800})
     # Pretend keyboard: real offset + shrunk visual viewport, dispatched resize AND scroll.
     await pg.evaluate('''()=>{startGame();for(const [k,v] of Object.entries({width:390,height:320,offsetTop:140,offsetLeft:35}))Object.defineProperty(visualViewport,k,{configurable:true,get:()=>v});visualViewport.dispatchEvent(new Event('resize'));visualViewport.dispatchEvent(new Event('scroll'))}''')
     rect=await pg.evaluate('''()=>Object.fromEntries(['cv','msg','bar','hud'].map(id=>{const r=document.getElementById(id).getBoundingClientRect();return [id,{x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:r.width,height:r.height}]}))''')
@@ -73,16 +81,44 @@ async def main():
     ok('remembered Skip seeks once seekable',await pg.evaluate('__plato.state.skipPending&&Math.abs(mockVideo.time-25.24)<0.01'))
     await pg.evaluate('video.dispatchEvent(new Event("seeked"))');await pg.wait_for_timeout(100)
     ok('deferred Skip then holds decoded title',await pg.evaluate('__plato.state.introState==="hold"&&video.paused'))
-    await pg.evaluate('startIntro();for(let i=0;i<6;i++)document.getElementById("skipBtn").click();mockVideo.time=25.24;mockVideo.ready=4;video.dispatchEvent(new Event("seeked"))');await pg.wait_for_timeout(3800)
+    await pg.evaluate('startIntro();mockVideo.noseek=true;mockVideo.dur=NaN;mockVideo.ready=1;document.getElementById("skipBtn").click();mockVideo.dur=25.36;mockVideo.ready=2;video.dispatchEvent(new Event("canplay"))')
+    ok('remembered Skip with permanently empty ranges seeks once data ready',await pg.evaluate('__plato.state.skipPending&&mockVideo.time>23&&!video.paused'))
+    await pg.evaluate('video.dispatchEvent(new Event("seeked"))');await pg.wait_for_timeout(100)
+    ok('empty-range decoded title safely held',await pg.evaluate('__plato.state.introState==="hold"&&video.paused'))
+    await pg.evaluate('mockVideo.noseek=false;startIntro();for(let i=0;i<6;i++)document.getElementById("skipBtn").click();mockVideo.time=25.24;mockVideo.ready=4;video.dispatchEvent(new Event("seeked"))');await pg.wait_for_timeout(3800)
     ok('rapid Skips: no stale fallback resumes after successful seek',await pg.evaluate('__plato.state.introState==="hold"&&video.paused'))
-    keys=await pg.evaluate('caches.keys()');ok('build 3 cache installed', 'platocave-v3' in keys)
+    keys=await pg.evaluate('caches.keys()');ok('build 4 cache installed', 'platocave-v4' in keys)
     await c.set_offline(True);await pg.reload();await pg.wait_for_timeout(500);ok('works offline after first load',await pg.is_visible('#startBtn'))
     rr=await pg.evaluate('''async()=>{const r=await fetch('assets/intro.mp4',{headers:{range:'bytes=-4096'}});return {s:r.status,cr:r.headers.get('content-range'),size:(await r.arrayBuffer()).byteLength}}''')
     ok('offline seek byte range served from cached video',rr['s']==206 and rr['size']==4096 and rr['cr'].startswith('bytes '))
     rr=await pg.evaluate('''async()=>{const r=await fetch('assets/intro.mp4',{headers:{range:'bytes=99-9'}});return {s:r.status,cr:r.headers.get('content-range')}}''')
     ok('offline reversed range returns 416 not illegal 206',rr['s']==416 and rr['cr'].startswith('bytes */'))
     await pg.click('#startBtn');await pg.wait_for_timeout(500);ok('music plays offline',await pg.evaluate('!music.paused'))
-    ok('no page errors',not errs);print(errs,flush=True);await b.close()
+    ok('no page errors',not errs);print(errs,flush=True)
+    # Actual worker migration, not a source-pattern assertion: manufacture a complete older
+    # cache with no manifest/pins, leave its window open, then install this worker anew.
+    upgrade_ctx=await b.new_context();old=await upgrade_ctx.new_page();await old.goto(U)
+    await old.evaluate('navigator.serviceWorker.ready');await old.reload();await old.wait_for_function('!!navigator.serviceWorker.controller')
+    await old.evaluate('''async()=>{
+      const src=await caches.open('platocave-v4'),dst=await caches.open('platocave-v2');
+      for(const req of await src.keys()){if(req.url.endsWith('__build_manifest__'))continue;
+        const url=req.url.replace(/([?]v=)4$/,(_,a)=>a+'2');await dst.put(url,await src.match(req))}
+      const meta=await caches.open('platocave-vmeta');await meta.put('meta',new Response(JSON.stringify({current:'2'})));
+      await navigator.serviceWorker.register('sw.js?r3-upgrade',{scope:'./'});
+    }''')
+    await old.wait_for_function('''async()=>{const c=await caches.open('platocave-vmeta'),r=await c.match('meta'),m=await r.json();return m.current==='2'&&m.pending==='4'&&Object.values(m.pins||{}).includes('2')}''')
+    await old.wait_for_function('navigator.serviceWorker.controller.scriptURL.includes("r3-upgrade")')
+    migration=await old.evaluate('''async()=>{const m=await (await (await caches.open('platocave-vmeta')).match('meta')).json();return {m,keys:await caches.keys()}}''')
+    ok('actual install pins unpinned legacy tab before claim; build 4 pending',migration['m']['current']=='2' and migration['m']['pending']=='4' and 'platocave-v2' in migration['keys'])
+    text=await old.evaluate('fetch("game.js?v=2").then(r=>r.text())')
+    ok('legacy client still reads its v2 script key', 'const TITLE_TIME=23.0' in text)
+    new=await upgrade_ctx.new_page();await new.goto(U);await new.wait_for_function('!!navigator.serviceWorker.controller')
+    migration=await new.evaluate('''async()=>({m:await (await (await caches.open('platocave-vmeta')).match('meta')).json(),keys:await caches.keys()})''')
+    ok('actual next launch promotes 4 but retains old live cache',migration['m']['current']=='4' and 'platocave-v2' in migration['keys'] and '2' in migration['m']['pins'].values())
+    await old.close();await new.reload()
+    await new.wait_for_function('caches.keys().then(k=>!k.includes("platocave-v2"))')
+    ok('actual cleanup reclaims legacy cache only after window closes',True)
+    await upgrade_ctx.close();await b.close()
   summary={'passed':sum(1 for _,x in res if x),'failed':sum(1 for _,x in res if not x),'checks':res}
   (OUT/'browser-results.json').write_text(json.dumps(summary,indent=2));print(summary['passed'],'passed,',summary['failed'],'failed');sys.exit(0 if all(x for _,x in res) else 1)
 asyncio.run(main())

@@ -5,22 +5,46 @@
 // build's cache. A new navigation may take a completed pending build; already-open clients keep their old cache,
 // which is deleted only after every client pinned to it has closed (checked with clients.matchAll).
 const PREFIX="platocave-v",META=PREFIX+"meta";
-const SHELL=["./","index.html","style.css?v=2","shapes.js?v=3","sfx.js?v=1","game.js?v=3","manifest.webmanifest","icons/icon-192.png","icons/icon-512.png","icons/maskable-512.png","assets/cave-wall.jpg","assets/intro.mp4","assets/intro-music.mp3"];
+const SHELL=["./","index.html","style.css?v=2","shapes.js?v=4","sfx.js?v=1","game.js?v=4","manifest.webmanifest","icons/icon-192.png","icons/icon-512.png","icons/maskable-512.png","assets/cave-wall.jpg","assets/intro.mp4","assets/intro-music.mp3"];
 const VERSION_URL="version.json";
 // Meta read-modify-writes are serialized so concurrent fetches cannot lose pins.
 let metaLock=Promise.resolve();function withMeta(fn){const p=metaLock.then(async()=>{const m=await getMeta();const r=await fn(m);await setMeta(m);return r});metaLock=p.catch(()=>{});return p}
 async function getMeta(){try{const c=await caches.open(META),r=await c.match("meta");return r?await r.json():{}}catch(e){return {}}}
 async function setMeta(m){const c=await caches.open(META);await c.put("meta",new Response(JSON.stringify(m),{headers:{"content-type":"application/json"}}))}
 async function remoteBuild(){const ac=new AbortController(),t=setTimeout(()=>ac.abort(),8000);let r;try{r=await fetch(VERSION_URL,{cache:"no-store",signal:ac.signal})}finally{clearTimeout(t)}if(!r.ok)throw new Error("version "+r.status);const j=await r.json();if(!j||!j.build)throw new Error("no build");return String(j.build)}
-async function complete(build){if(!build)return false;if(!(await caches.has(PREFIX+build)))return false;const c=await caches.open(PREFIX+build);for(const u of SHELL)if(!(await c.match(u)))return false;return true}
-// all-or-nothing download: nothing is written unless every file came back 200
-async function download(build){const res=await Promise.all(SHELL.map(u=>fetch(new Request(u,{cache:"reload"})).then(r=>{if(!r.ok||r.status!==200)throw new Error(u+" "+r.status);return r})));
- await caches.delete(PREFIX+build);const c=await caches.open(PREFIX+build);for(let i=0;i<SHELL.length;i++)await c.put(SHELL[i],res[i]);
- if(!(await complete(build))){await caches.delete(PREFIX+build);throw new Error("incomplete")}}
-// Keep META, current, pending, and the pinned build of every still-open client; forget pins of closed clients.
-async function cleanup(m){let alive=null;try{alive=new Set((await self.clients.matchAll({includeUncontrolled:true,type:"all"})).map(c=>c.id))}catch(_){}
- const pins=m.pins||{};if(alive)for(const id of Object.keys(pins))if(!alive.has(id))delete pins[id];m.pins=pins;
- const keep=new Set([META,PREFIX+m.current,PREFIX+m.pending]);for(const id in pins)keep.add(PREFIX+pins[id]);
+const MANIFEST="__build_manifest__",activeStages=new Set();let stageId=0;
+// Fixed pre-manifest shell contract; future SHELL additions must not invalidate older caches.
+const LEGACY_CORE=["index.html","style.css","sfx.js","manifest.webmanifest","icons/icon-192.png","icons/icon-512.png","icons/maskable-512.png","assets/cave-wall.jpg","assets/intro.mp4","assets/intro-music.mp3"];
+async function cacheComplete(name,build){if(!(await caches.has(name)))return false;const c=await caches.open(name),manifest=await c.match(MANIFEST);
+ if(manifest){try{const m=await manifest.json();if(m.build!==String(build)||!Array.isArray(m.keys)||!m.keys.length)return false;for(const u of m.keys)if(!(await c.match(u)))return false;return true}catch(_){return false}}
+ // Legacy cache: use its OWN script queries, not this worker's new SHELL queries.
+ const keys=(await c.keys()).map(r=>new URL(r.url));
+ for(const script of ["game.js","shapes.js"])if(!keys.some(u=>u.pathname.endsWith("/"+script)&&u.searchParams.get("v")===String(build)))return false;
+ for(const path of LEGACY_CORE)if(!keys.some(u=>u.pathname.endsWith("/"+path)))return false;return true}
+async function complete(build){return !!build&&cacheComplete(PREFIX+build,build)}
+async function liveClients(){return self.clients.matchAll({includeUncontrolled:true,type:"all"})}
+// Migrating workers must record unpinned old windows before current promotion, cleanup or claim.
+async function pinOpen(m){m.pins=m.pins||{};let old=m.current;
+ if(!(await complete(old))){old=null;for(const name of await caches.keys()){const b=name.slice(PREFIX.length);if(name.startsWith(PREFIX)&&await complete(b)){old=b;break}}if(old)m.current=old}
+ for(const c of await liveClients())if(!m.pins[c.id]&&old)m.pins[c.id]=old}
+async function inUse(m,build){const live=new Set((await liveClients()).map(c=>c.id));return Object.keys(m.pins||{}).some(id=>live.has(id)&&m.pins[id]===build)}
+// all-or-nothing download into an unpublished identity. Never rewrite a live tab's cache.
+async function download(build){const stage=PREFIX+build+"-staging-"+Date.now()+"-"+(++stageId);activeStages.add(stage);
+ try{const res=await Promise.all(SHELL.map(u=>fetch(new Request(u,{cache:"reload"})).then(r=>{if(!r.ok||r.status!==200)throw new Error(u+" "+r.status);return r})));
+ const c=await caches.open(stage);for(let i=0;i<SHELL.length;i++)await c.put(SHELL[i],res[i]);
+ await c.put(MANIFEST,new Response(JSON.stringify({build:String(build),keys:SHELL}),{headers:{"content-type":"application/json"}}));
+ if(!(await cacheComplete(stage,build)))throw new Error("incomplete staging");
+ await withMeta(async m=>{await pinOpen(m);if(await inUse(m,build)){
+   // A rollback to an already-live immutable build reuses its complete bytes, never swaps them.
+   if(!(await complete(build)))throw new Error("target in use");return}
+  await caches.delete(PREFIX+build);const dest=await caches.open(PREFIX+build);
+  try{for(const req of await c.keys())await dest.put(req,await c.match(req));if(!(await complete(build)))throw new Error("incomplete publish")}
+  catch(e){await caches.delete(PREFIX+build);throw e}});
+ }finally{activeStages.delete(stage);await caches.delete(stage)}}
+// Keep META, current, pending, and every live pin. Claim only after pinOpen has been persisted.
+async function cleanup(m){await pinOpen(m);const alive=new Set((await liveClients()).map(c=>c.id)),pins=m.pins||{};
+ for(const id of Object.keys(pins))if(!alive.has(id))delete pins[id];m.pins=pins;
+ const keep=new Set([META,PREFIX+m.current,PREFIX+m.pending,...activeStages]);for(const id in pins)keep.add(PREFIX+pins[id]);
  for(const k of await caches.keys())if(k.startsWith(PREFIX)&&!keep.has(k))await caches.delete(k)}
 async function ranged(res,rg){const b=await res.blob(),size=b.size,m=/^bytes=(\d*)-(\d*)$/.exec(rg.trim());
  const invalid=()=>new Response(null,{status:416,headers:{"content-range":"bytes */"+size,"accept-ranges":"bytes","content-length":"0"}});
@@ -40,9 +64,10 @@ async function buildFor(e){const r=e.request,nav=r.mode==="navigate",id=nav?(e.r
 async function fromBuild(build,r){if(!build||!(await caches.has(PREFIX+build)))return null;const c=await caches.open(PREFIX+build);
  // exact URL first, then ignoreSearch only inside the SAME pinned build's cache; never another build's cache
  let hit=await c.match(r.url)||await c.match(r.url,{ignoreSearch:true});if(!hit&&r.mode==="navigate")hit=await c.match("index.html");return hit||null}
-self.addEventListener("install",e=>{e.waitUntil((async()=>{const m=await getMeta();if(!(await complete(m.current))){const b=await remoteBuild();await download(b);await withMeta(m2=>{m2.current=b;delete m2.pending})}await self.skipWaiting()})())});
-// claim() only takes control; claimed old tabs get pinned to the current (their own) build on their next request.
-self.addEventListener("activate",e=>{e.waitUntil((async()=>{await withMeta(async m=>{if(m.current)await cleanup(m)});await self.clients.claim()})())});
+self.addEventListener("install",e=>{e.waitUntil((async()=>{await withMeta(pinOpen);
+ try{const b=await remoteBuild(),m=await getMeta();if(b!==m.current&&b!==m.pending){await download(b);await withMeta(async m2=>{if(await complete(m2.current))m2.pending=b;else m2.current=b})}}
+ catch(_){/* silent: keep working old cache on failed update */}await self.skipWaiting()})())});
+self.addEventListener("activate",e=>{e.waitUntil((async()=>{await withMeta(async m=>{await pinOpen(m);if(m.current)await cleanup(m)});await self.clients.claim()})())});
 self.addEventListener("message",e=>{if(e.data==="check")e.waitUntil(checkUpdate())});
 self.addEventListener("fetch",e=>{const r=e.request,u=new URL(r.url);if(r.method!=="GET"||u.origin!==location.origin)return;
  if(u.pathname.endsWith("/"+VERSION_URL)){e.respondWith(fetch(r,{cache:"no-store"}).catch(()=>new Response("{}",{status:503})));return}
