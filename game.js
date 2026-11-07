@@ -22,9 +22,11 @@ video.addEventListener("seeked",()=>{if(!skipPending)return;
  if(!valid()){resumeIntro();return}
  if(video.requestVideoFrameCallback)video.requestVideoFrameCallback((_,meta)=>{if(valid()&&meta.mediaTime>=TITLE_TIME)toHold();else resumeIntro()});
  else requestAnimationFrame(()=>{if(valid())toHold();else resumeIntro()})});
-// Can we seek to the title yet? Needs a finite duration and (when reported) a seekable range reaching the title.
+// Can we seek to the title yet? Needs a finite duration and decoded data or a seekable range reaching the title.
 function canSeekTitle(){if(!Number.isFinite(video.duration)||video.duration<TITLE_TIME)return false;const r=video.seekable;
- return r&&r.length ? r.end(r.length-1)>=Math.max(TITLE_TIME,video.duration-0.25) : video.readyState>=2}
+ // A range reaching the title is enough. No range, or one that stops short of the title (Chromium can report
+ // length 1 / end 0 on a first uncached load), counts as empty: fall back to decoded data and attempt the safe seek.
+ const end=r&&r.length?r.end(r.length-1):NaN;if(Number.isFinite(end)&&end>=TITLE_TIME)return true;return video.readyState>=2}
 // One safe seek-to-title attempt. Always clears the previous fallback timer first, so rapid Skips never leave a stale one.
 function trySkip(){if(introState!=="playing")return;clearTimeout(seekTimer);seekTimer=0;
  if(!canSeekTitle()){/* not seekable yet (first uncached load): remember the request, keep playing, never hold black */

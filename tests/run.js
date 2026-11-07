@@ -27,7 +27,7 @@ const game=read("game.js");
 t("scoring: +100 on correct, no points + original SFX on wrong",()=>{ok(/if\(ok\)\{score\+=100/.test(game));ok(/else\{PlatoSfx\.wrong\(\)/.test(game));const sfx=read("sfx.js");ok(/createOscillator/.test(sfx)&&!/\.(mp3|wav|ogg)/.test(sfx),"sfx must be synthesized")});
 t("no ads / trackers / CDN",()=>{for(const f of ["index.html","game.js","shapes.js","sfx.js","sw.js","style.css","manifest.webmanifest"]){const s=read(f).toLowerCase();for(const bad of ["adsbygoogle","adsense","doubleclick","googletagmanager","google-analytics","gtag(","admob","applovin","unityads","facebook.net","cdn.","https://","http://"])ok(!s.includes(bad),f+" has "+bad)}});
 t("service worker caches every bundled asset and they exist",()=>{const sw=read("sw.js");const list=JSON.parse(sw.match(/const SHELL=(\[.*?\]);/)[1]);
- for(const a of ["assets/intro.mp4","assets/intro-music.mp3","assets/cave-wall.jpg","game.js?v=4","shapes.js?v=4","sfx.js?v=1","style.css?v=2","index.html"])ok(list.includes(a),a);
+ for(const a of ["assets/intro.mp4","assets/intro-music.mp3","assets/cave-wall.jpg","game.js?v=5","shapes.js?v=4","sfx.js?v=1","style.css?v=2","index.html"])ok(list.includes(a),a);
  for(const a of list)if(a!=="./")ok(fs.existsSync(path.join(R,a.split("?")[0])),"missing "+a);const html=read("index.html");for(const m of html.matchAll(/(?:src|href)="([^"]+)"/g))ok(list.includes(m[1])||m[1].startsWith("icons/")&&list.includes(m[1])||m[1]==="manifest.webmanifest","uncached "+m[1])});
 t("update path: version.json never cached, pending build, silent fail",()=>{const sw=read("sw.js");ok(/cache:"no-store"/.test(sw));ok(!/"version\.json"\s*[,\]]/.test(sw.match(/const SHELL=(\[.*?\]);/)[1]));ok(/pending/.test(sw)&&/silent/.test(sw));ok(JSON.parse(read("version.json")).build)});
 t("manifest standalone/fullscreen",()=>{const m=JSON.parse(read("manifest.webmanifest"));ok(m.display==="fullscreen"&&m.display_override.includes("standalone"))});
@@ -39,7 +39,7 @@ for(const name of ["ball","cube","house","heart","tower"])t("a "+name,()=>ok(S.a
 t("wooden eagle is volumetric and accepted",()=>{const bird=S.SHAPES.find(s=>s.name==="bird");ok(bird.mesh.f.length>500);ok(S.isCorrect(bird,"wooden eagle"));ok(S.isCorrect(bird,"eagle"))});
 t("cone and pyramid have distinct projected bases throughout animation",()=>{const c=S.SHAPES[2],p=S.SHAPES[4];for(const time of [0,1000,4000,8000]){const cv=S.displayPose(c,time),pv=S.displayPose(p,time);ok(Math.max(...cv.map(v=>v[1]))>0);ok(JSON.stringify(cv)!==JSON.stringify(pv))}});
 
-t("version bumped to build 4 with cache-busted changed scripts",()=>{ok(JSON.parse(read("version.json")).build==="4");const html=read("index.html");ok(html.includes('src="game.js?v=4"')&&html.includes('src="shapes.js?v=4"')&&html.includes('src="sfx.js?v=1"'))});
+t("version bumped to build 5 with cache-busted changed scripts",()=>{ok(JSON.parse(read("version.json")).build==="5");const html=read("index.html");ok(html.includes('src="game.js?v=5"')&&html.includes('src="shapes.js?v=4"')&&html.includes('src="sfx.js?v=1"'))});
 t("cave wall image unchanged",()=>ok(sha("assets/cave-wall.jpg")==="5916d37cdf7759752ae694807358018d06d7c99b0aebd9e0d1b1697491e315d0"));
 t("Skip clears the previous fallback timer before assigning a new one",()=>{const body=game.match(/function trySkip\(\)\{[\s\S]*?\n function|function trySkip\(\)\{[\s\S]*?resumeIntro\(\)\}\}/)[0];
  const iClear=body.indexOf("clearTimeout(seekTimer)"),iSet=body.indexOf("seekTimer=setTimeout");ok(iClear>=0&&iSet>iClear,"clear before set");
@@ -70,6 +70,15 @@ t("rapid Skips leave exactly one live fallback; remembered skip retries once see
  // Empty seekable ranges can persist even once decoded data and finite duration exist.
  api.startIntro();video.duration=NaN;video.readyState=1;video.seekable={length:0,end:()=>0};api.trySkip();ok(api.s.skipWanted);
  video.duration=25.36;video.readyState=2;fire("canplay");ok(api.s.skipPending&&video.currentTime>23,"empty ranges fallback seeks");fire("seeked");ok(api.s.introState==="hold","decoded empty-range hold");
+ // QA leftover: Chromium first uncached load reports duration 25.36, readyState 4, but seekable length 1 / end 0.
+ api.startIntro();video.currentTime=3;video.duration=NaN;video.readyState=1;video.seekable={length:1,end:()=>0};api.trySkip();ok(api.s.skipWanted&&!api.s.skipPending,"NaN duration only remembers");
+ video.duration=25.36;video.readyState=4;fire("timeupdate");ok(!api.s.skipWanted&&api.s.skipPending&&timers.size===1&&Math.abs(video.currentTime-25.24)<1e-6,"end-0 range attempts safe seek via retry");
+ fire("seeked");ok(api.s.introState==="hold","end-0 range holds decoded title");
+ api.startIntro();video.currentTime=3;video.seekable={length:1,end:()=>0};api.trySkip();ok(api.s.skipPending&&!api.s.skipWanted&&Math.abs(video.currentTime-25.24)<1e-6,"end-0 range direct Skip seeks");
+ video.currentTime=0;video.readyState=0;fire("seeked");ok(api.s.introState==="playing"&&!video.paused&&timers.size===0,"end-0 failed seek keeps playing");video.readyState=4;
+ // A range reaching TITLE_TIME but not duration-0.25 is enough to attempt the seek.
+ api.startIntro();video.currentTime=3;video.seekable={length:1,end:()=>24.0};api.trySkip();ok(api.s.skipPending&&Math.abs(video.currentTime-25.24)<1e-6,"range end 24.0 seeks");
+ video.seekable={length:1,end:()=>22.9};video.readyState=1;api.startIntro();api.trySkip();ok(api.s.skipWanted&&!api.s.skipPending,"short range without data waits");video.readyState=4;video.seekable={length:1,end:()=>25.36};
  api.startIntro();
  // and the deferred path also clears a previous timer
  video.readyState=4;api.trySkip();const before=timers.size;video.seekable={length:0,end:()=>0};video.readyState=0;api.trySkip();ok(before===1&&timers.size===0,"deferring clears the old fallback")});
@@ -114,7 +123,7 @@ await at("SW: open tab stays pinned to its build and keeps its cache; next launc
  const get=async(url,clientId,nav,result)=>{const x=ev({request:new Req(url,{mode:nav?"navigate":"no-cors"}),clientId:clientId||"",resultingClientId:result||""});L.fetch(x.e);const r=await x.done();return r?await r.text():null};
  open.add("A");ok((await get("index.html",null,true,"A")).startsWith("build2"),"A launches build 2");
  remote="3";const chk=ev({data:"check"});L.message(chk.e);await chk.done();ok(store.has("platocave-v3"),"build 3 downloaded as pending");
- ok((await get("game.js?v=4","A")).startsWith("build2"),"A still served build 2 before any relaunch");
+ ok((await get("game.js?v=5","A")).startsWith("build2"),"A still served build 2 before any relaunch");
  open.add("B");ok((await get("index.html",null,true,"B")).startsWith("build3"),"new launch B takes pending build 3");
  ok(store.has("platocave-v2"),"old cache kept while A is open");ok((await get("assets/intro.mp4","A")).startsWith("build2"),"A never gets build-3 bytes");
  ok((await get("game.js?v=9","A")).startsWith("build2"),"ignoreSearch fallback stays inside A's pinned cache");
@@ -122,7 +131,7 @@ await at("SW: open tab stays pinned to its build and keeps its cache; next launc
  open.delete("A");open.add("C");await get("index.html",null,true,"C");ok(!store.has("platocave-v2"),"old cache deleted after A closed");
  // Simulate an older v2 worker's manifest-less cache and an unpinned already-playing window.
  open.clear();open.add("LEGACY");const legacy=await caches.open("platocave-v2");
- for(const u of JSON.parse(SHELLf))await legacy.put(u.replace(/([?]v=)4$/, "$12"),new Response("legacy2:"+u));
+ for(const u of JSON.parse(SHELLf))await legacy.put(u.replace(/([?]v=)[45]$/, "$12"),new Response("legacy2:"+u));
  await c2.setMeta({current:"2"});remote="4";
  const upgrade=ev({});L.install(upgrade.e);await upgrade.done();let meta=await c2.getMeta();
  ok(meta.current==="2"&&meta.pending==="4"&&meta.pins.LEGACY==="2","install pins legacy before pending promotion");

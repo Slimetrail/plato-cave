@@ -3,13 +3,29 @@ import asyncio,sys,os,json
 from pathlib import Path
 from playwright.async_api import async_playwright
 U=os.environ.get('PLATO_URL','http://127.0.0.1:19543/')
-OUT=Path('/workspace/plato-cave/game-export/r3-fixes');OUT.mkdir(parents=True,exist_ok=True)
+OUT=Path('/workspace/plato-cave/game-export/leftover-skip-fix');OUT.mkdir(parents=True,exist_ok=True)
 async def main():
   res=[]
   def ok(n,c):res.append((n,bool(c)));print('PASS' if c else 'FAIL',n,flush=True)
   async with async_playwright() as p:
     b=await p.chromium.launch(args=['--autoplay-policy=no-user-gesture-required']);c=await b.new_context(viewport={'width':1280,'height':800},has_touch=True);pg=await c.new_page()
     errs=[];pg.on('pageerror',lambda e:errs.append(str(e)))
+    # REAL first uncached HTTP load: fresh context, no preload, no reload before Skip.
+    fc=await b.new_context(viewport={'width':1280,'height':800},has_touch=True);await fc.add_init_script("window.__seeks=[];for(const n of ['seeking','seeked'])document.addEventListener(n,e=>{const v=e.target;window.__seeks.push({ev:n,t:v.currentTime,se:v.seekable.length?v.seekable.end(v.seekable.length-1):null,pending:window.__plato?__plato.state.skipPending:null,at:Math.round(performance.now())})},true)");fp=await fc.new_page();ferrs=[];fp.on('pageerror',lambda e:ferrs.append(str(e)))
+    await fp.goto(U);await fp.click('#startBtn');await fp.wait_for_timeout(400);await fp.click('#skipBtn')
+    probe='({dur:video.duration,rs:video.readyState,sl:video.seekable.length,se:video.seekable.length?video.seekable.end(video.seekable.length-1):null,s:__plato.state.introState,t:video.currentTime,title:__plato.state.titleReady,sp:__plato.state.skipPending,sw:__plato.state.skipWanted,vp:video.paused,hint:document.getElementById("tapHint").classList.contains("on"),ctrl:!!navigator.serviceWorker.controller})'
+    first=[]
+    for ms in (150,1000,2500):
+      await fp.wait_for_timeout(ms-(0 if not first else [150,1000,2500][len(first)-1]));first.append(await fp.evaluate(probe));print('FIRST UNCACHED SKIP',ms,'ms',first[-1],flush=True)
+    await fp.screenshot(path=str(OUT/'first-uncached-skip.png'))
+    fl=first[-1];seeks=await fp.evaluate('window.__seeks');print('FIRST UNCACHED SEEK EVENTS',seeks,flush=True);firstUncached={'samples':first,'seek_events':seeks,'errors':ferrs}
+    if fl['s']=='hold':
+      ok('REAL first-uncached Skip holds locked title (t>=23, Tap to play)',fl['t']>=23 and fl['vp'] and fl['title'] and fl['hint'])
+    else:
+      attempted=any(x['ev']=='seeking' for x in seeks)
+      ok('REAL first-uncached Skip attempted the seek and keeps playing (no black hold)',attempted and not fl['vp'])
+    ok('REAL first-uncached Skip not stuck in skipWanted while seekable-by-data',len(seeks)>0 and not (fl['sw'] and fl['s']=='playing' and fl['dur']>=23 and fl['rs']>=2))
+    ok('first-uncached no page errors',not ferrs);await fc.close()
     await pg.goto(U);await pg.evaluate('navigator.serviceWorker.ready');await pg.reload();await pg.wait_for_function('!!navigator.serviceWorker.controller')
     await pg.click('#startBtn');await pg.wait_for_timeout(2100)
     st=await pg.evaluate('({v:!video.paused,t:video.currentTime,m:!music.paused,e:video.error?.code,s:__plato.state.introState})')
@@ -17,7 +33,7 @@ async def main():
     await pg.click('#skipBtn');await pg.wait_for_timeout(1800)
     st=await pg.evaluate('({s:__plato.state.introState,m:!music.paused,loop:music.loop,vp:video.paused,t:video.currentTime,title:__plato.state.titleReady})')
     print('REAL SKIP',st,flush=True)
-    await pg.screenshot(path=str(OUT/'skip-after-2s.png'))
+    await pg.screenshot(path=str(OUT/'cached-reload-skip-title-hold.png'))
     if st['s']=='hold':
       ok('real decoded Skip title hold, music continues',st['t']>=23 and st['m'] and st['loop'] and st['vp'] and st['title'])
       await pg.mouse.click(600,400);ok('real title tap starts game',await pg.is_visible('#game'))
@@ -55,7 +71,7 @@ async def main():
     await pg.reload();await pg.evaluate('''()=>{
       window.mockVideo={time:0,ready:4,paused:true,seeking:false,plays:0};
       for(const [key,field] of [['currentTime','time'],['readyState','ready'],['paused','paused'],['seeking','seeking']])Object.defineProperty(video,key,{configurable:true,get:()=>mockVideo[field],set:v=>mockVideo[field]=v});
-      Object.defineProperty(video,'duration',{configurable:true,get:()=>mockVideo.dur??25.36});Object.defineProperty(video,'seekable',{configurable:true,get:()=>({length:mockVideo.noseek?0:1,end:()=>mockVideo.dur??25.36})});
+      Object.defineProperty(video,'duration',{configurable:true,get:()=>mockVideo.dur??25.36});Object.defineProperty(video,'seekable',{configurable:true,get:()=>({length:mockVideo.noseek?0:1,end:()=>mockVideo.end??mockVideo.dur??25.36})});
       video.play=()=>{mockVideo.paused=false;mockVideo.plays++;return Promise.resolve()};video.pause=()=>{mockVideo.paused=true};
       video.requestVideoFrameCallback=cb=>setTimeout(()=>cb(performance.now(),{mediaTime:mockVideo.time}),0);
       const realPlay=music.play.bind(music);window.musicCalls=0;music.play=()=>{musicCalls++;return musicCalls===1?Promise.reject(new Error('blocked unlock')):realPlay()};
@@ -87,7 +103,14 @@ async def main():
     ok('empty-range decoded title safely held',await pg.evaluate('__plato.state.introState==="hold"&&video.paused'))
     await pg.evaluate('mockVideo.noseek=false;startIntro();for(let i=0;i<6;i++)document.getElementById("skipBtn").click();mockVideo.time=25.24;mockVideo.ready=4;video.dispatchEvent(new Event("seeked"))');await pg.wait_for_timeout(3800)
     ok('rapid Skips: no stale fallback resumes after successful seek',await pg.evaluate('__plato.state.introState==="hold"&&video.paused'))
-    keys=await pg.evaluate('caches.keys()');ok('build 4 cache installed', 'platocave-v4' in keys)
+    await pg.evaluate('startIntro();mockVideo.time=3;mockVideo.noseek=false;mockVideo.dur=25.36;mockVideo.end=0;mockVideo.ready=4;document.getElementById("skipBtn").click()')
+    ok('QA mock (len 1, end 0, dur 25.36, ready 4): Skip attempts safe seek',await pg.evaluate('__plato.state.skipPending&&!__plato.state.skipWanted&&Math.abs(mockVideo.time-25.24)<0.01'))
+    await pg.evaluate('video.dispatchEvent(new Event("seeked"))');await pg.wait_for_timeout(100)
+    ok('QA mock end-0 range holds decoded title after seeked',await pg.evaluate('__plato.state.introState==="hold"&&video.paused&&__plato.state.titleReady'))
+    await pg.evaluate('mockVideo.end=24.0;startIntro();mockVideo.time=3;document.getElementById("skipBtn").click()')
+    ok('mock range end 24.0 (< dur-0.25) still seeks',await pg.evaluate('__plato.state.skipPending&&Math.abs(mockVideo.time-25.24)<0.01'))
+    await pg.evaluate('delete mockVideo.end')
+    keys=await pg.evaluate('caches.keys()');ok('build 5 cache installed', 'platocave-v5' in keys)
     await c.set_offline(True);await pg.reload();await pg.wait_for_timeout(500);ok('works offline after first load',await pg.is_visible('#startBtn'))
     rr=await pg.evaluate('''async()=>{const r=await fetch('assets/intro.mp4',{headers:{range:'bytes=-4096'}});return {s:r.status,cr:r.headers.get('content-range'),size:(await r.arrayBuffer()).byteLength}}''')
     ok('offline seek byte range served from cached video',rr['s']==206 and rr['size']==4096 and rr['cr'].startswith('bytes '))
@@ -100,25 +123,25 @@ async def main():
     upgrade_ctx=await b.new_context();old=await upgrade_ctx.new_page();await old.goto(U)
     await old.evaluate('navigator.serviceWorker.ready');await old.reload();await old.wait_for_function('!!navigator.serviceWorker.controller')
     await old.evaluate('''async()=>{
-      const src=await caches.open('platocave-v4'),dst=await caches.open('platocave-v2');
+      const src=await caches.open('platocave-v5'),dst=await caches.open('platocave-v2');
       for(const req of await src.keys()){if(req.url.endsWith('__build_manifest__'))continue;
-        const url=req.url.replace(/([?]v=)4$/,(_,a)=>a+'2');await dst.put(url,await src.match(req))}
+        const url=req.url.replace(/([?]v=)[45]$/,(_,a)=>a+'2');await dst.put(url,await src.match(req))}
       const meta=await caches.open('platocave-vmeta');await meta.put('meta',new Response(JSON.stringify({current:'2'})));
       await navigator.serviceWorker.register('sw.js?r3-upgrade',{scope:'./'});
     }''')
-    await old.wait_for_function('''async()=>{const c=await caches.open('platocave-vmeta'),r=await c.match('meta'),m=await r.json();return m.current==='2'&&m.pending==='4'&&Object.values(m.pins||{}).includes('2')}''')
+    await old.wait_for_function('''async()=>{const c=await caches.open('platocave-vmeta'),r=await c.match('meta'),m=await r.json();return m.current==='2'&&m.pending==='5'&&Object.values(m.pins||{}).includes('2')}''')
     await old.wait_for_function('navigator.serviceWorker.controller.scriptURL.includes("r3-upgrade")')
     migration=await old.evaluate('''async()=>{const m=await (await (await caches.open('platocave-vmeta')).match('meta')).json();return {m,keys:await caches.keys()}}''')
-    ok('actual install pins unpinned legacy tab before claim; build 4 pending',migration['m']['current']=='2' and migration['m']['pending']=='4' and 'platocave-v2' in migration['keys'])
+    ok('actual install pins unpinned legacy tab before claim; build 5 pending',migration['m']['current']=='2' and migration['m']['pending']=='5' and 'platocave-v2' in migration['keys'])
     text=await old.evaluate('fetch("game.js?v=2").then(r=>r.text())')
     ok('legacy client still reads its v2 script key', 'const TITLE_TIME=23.0' in text)
     new=await upgrade_ctx.new_page();await new.goto(U);await new.wait_for_function('!!navigator.serviceWorker.controller')
     migration=await new.evaluate('''async()=>({m:await (await (await caches.open('platocave-vmeta')).match('meta')).json(),keys:await caches.keys()})''')
-    ok('actual next launch promotes 4 but retains old live cache',migration['m']['current']=='4' and 'platocave-v2' in migration['keys'] and '2' in migration['m']['pins'].values())
+    ok('actual next launch promotes 5 but retains old live cache',migration['m']['current']=='5' and 'platocave-v2' in migration['keys'] and '2' in migration['m']['pins'].values())
     await old.close();await new.reload()
     await new.wait_for_function('caches.keys().then(k=>!k.includes("platocave-v2"))')
     ok('actual cleanup reclaims legacy cache only after window closes',True)
     await upgrade_ctx.close();await b.close()
-  summary={'passed':sum(1 for _,x in res if x),'failed':sum(1 for _,x in res if not x),'checks':res}
+  summary={'passed':sum(1 for _,x in res if x),'failed':sum(1 for _,x in res if not x),'checks':res,'first_uncached':firstUncached}
   (OUT/'browser-results.json').write_text(json.dumps(summary,indent=2));print(summary['passed'],'passed,',summary['failed'],'failed');sys.exit(0 if all(x for _,x in res) else 1)
 asyncio.run(main())
