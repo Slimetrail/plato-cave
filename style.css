@@ -32,3 +32,10 @@ html,body{height:100%;background:#000;color:#f3e2c4;font-family:Georgia,"Times N
 #quote{position:absolute;left:50%;transform:translateX(-50%);top:calc(max(10px,env(safe-area-inset-top)) + 40px);width:min(92%,560px);text-align:center;pointer-events:none;text-shadow:0 1px 3px #000,0 0 6px #000,0 0 2px #000;line-height:1.25}
 #quote blockquote{font-style:italic;font-size:clamp(12px,2.8vw,16px);color:#f3e2c4}
 #quote figcaption{margin-top:2px;font-size:clamp(11px,2.4vw,14px);color:#c79a54;letter-spacing:.03em}
+
+/* Short landscape reserves full readable chrome instead of clipping the saying. */
+@media (orientation:landscape){
+ #quote{width:min(94%,760px);line-height:1.15}
+ #quote blockquote{font-size:clamp(11px,1.65vw,14px)}
+ #quote figcaption{font-size:clamp(10px,1.4vw,12px);margin-top:2px}
+}

@@ -103,7 +103,7 @@ function resize(){DPR=Math.min(2,window.devicePixelRatio||1);const vv=window.vis
  $("bar").style.top=(y+H-$("bar").offsetHeight)+"px";
  Object.assign($("msg").style,{left:x+"px",top:(y+H-$("bar").offsetHeight-56)+"px",bottom:"auto",width:W+"px"});
  Object.assign($("hud").style,{left:(x+14)+"px",top:(y+10)+"px",width:Math.max(0,W-28)+"px",right:"auto"});
- const q=$("quote");if(q)Object.assign(q.style,{left:(x+W/2)+"px",top:(y+10+$("hud").offsetHeight+6)+"px",maxHeight:Math.max(0,Math.round(H*0.2))+"px",overflow:"hidden"});
+ const q=$("quote");if(q)Object.assign(q.style,{left:(x+W/2)+"px",top:(y+10+$("hud").offsetHeight+6)+"px",maxHeight:"none",overflow:"visible"});
  cv.width=Math.round(W*DPR);cv.height=Math.round(H*DPR);sh.width=cv.width;sh.height=cv.height}
 addEventListener("resize",resize);if(window.visualViewport){visualViewport.addEventListener("resize",resize);visualViewport.addEventListener("scroll",resize)}resize();
 function startGame(level=activeLevel){activeLevel=Object.hasOwn(S.LEVELS,level)?level:"easy";activeShapes=S.LEVELS[activeLevel];round=0;score=0;if(!activeShapes.length){endGame();return}show("game");resize();newRound()}
@@ -119,7 +119,19 @@ function drawWall(t){const f=flicker(t);g.fillStyle="#000";g.fillRect(0,0,W,H);
  if(wall.complete&&wall.naturalWidth){const s=Math.max(W/wall.naturalWidth,H/wall.naturalHeight);const w=wall.naturalWidth*s,h=wall.naturalHeight*s;g.globalAlpha=0.9+f*0.08;g.drawImage(wall,(W-w)/2,(H-h)/2,w,h);g.globalAlpha=1}
  const gr=g.createRadialGradient(W*0.5,H*0.95,0,W*0.5,H*0.6,radius(Math.max(W,H)*0.8));gr.addColorStop(0,"rgba(255,150,50,"+(0.16+f*0.05)+")");gr.addColorStop(1,"rgba(0,0,0,0)");g.fillStyle=gr;g.fillRect(0,0,W,H)}
 function wallScale(){return Math.max(0,Math.min(W,H-120))/5.6}
-function drawShadow(shape,t){const L=light(t),v=poseOf(shape,t),s=S.castShadow(v,shape.mesh.f,L),k=wallScale(),cx=W/2,cy=(H-90)/2;
+// Landscape only: fit already-projected art between the full quote and message.
+// Reserve 24px above (including the soft shadow edge) and 12px below. Portrait
+// keeps its original scale/center; no clipping, mesh, light or material changes.
+function fitLandscape(points,scale,cy){
+ if(W<=H)return {scale,cy};
+ const origin=cv.getBoundingClientRect().top,q=$("quote").getBoundingClientRect();
+ const top=q.bottom-origin+24,bottom=$("msg").getBoundingClientRect().top-origin-12;
+ let lo=Infinity,hi=-Infinity;for(const p of points){lo=Math.min(lo,p[1]);hi=Math.max(hi,p[1])}
+ scale=Math.min(scale,Math.max(0,bottom-top)/Math.max(0.001,hi-lo));
+ cy=Math.max(top+hi*scale,Math.min(cy,bottom+lo*scale));
+ return {scale,cy}
+}
+function drawShadow(shape,t){const L=light(t),v=poseOf(shape,t),s=S.castShadow(v,shape.mesh.f,L),layout=fitLandscape(s.points,wallScale(),(H-90)/2),k=layout.scale,cx=W/2,cy=layout.cy;
  sg.setTransform(DPR,0,0,DPR,0,0);sg.clearRect(0,0,W,H);sg.fillStyle=sg.strokeStyle="#140802";sg.lineWidth=0.8;sg.lineJoin="round";
  for(const f of s.tris){const a=s.points[f[0]],b=s.points[f[1]],c=s.points[f[2]];sg.beginPath();sg.moveTo(cx+a[0]*k,cy-a[1]*k);sg.lineTo(cx+b[0]*k,cy-b[1]*k);sg.lineTo(cx+c[0]*k,cy-c[1]*k);sg.closePath();sg.fill();sg.stroke()}
  g.save();g.globalAlpha=0.9;g.globalCompositeOperation="multiply";g.filter="blur("+(2.5+Math.abs(flicker(t))*1.5)+"px)";g.drawImage(sh,0,0,W,H);g.restore();g.filter="none"}
@@ -181,6 +193,7 @@ function drawObject(shape,t,cx,cy,size){
  for(const c of [paint,tex,mask])if(c.width!==cv.width||c.height!==cv.height){c.width=cv.width;c.height=cv.height}
  pg.setTransform(DPR,0,0,DPR,0,0);pg.clearRect(0,0,W,H);tg.setTransform(DPR,0,0,DPR,0,0);
  const v=poseOf(shape,t),cam=7,mats=matsFor(shape),part=i=>shape.mesh.t?shape.mesh.t[i]||0:0;
+ const layout=fitLandscape(v.map(p=>[p[0]*cam/(cam-p[2]),p[1]*cam/(cam-p[2])]),size,cy);size=layout.scale;cy=layout.cy;
  const P=v.map(p=>{const s=cam/(cam-p[2]);return [cx+p[0]*s*size,cy-p[1]*s*size,p[2]]});
  // Rotate normals by exactly the object's pose (translation-free).
  const normals=S.displayPose({...shape,mesh:{v:vertexNormals(shape.mesh)}},t);

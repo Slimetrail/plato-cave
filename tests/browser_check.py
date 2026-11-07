@@ -3,7 +3,7 @@ import asyncio,sys,os,json
 from pathlib import Path
 from playwright.async_api import async_playwright
 U=os.environ.get('PLATO_URL','http://127.0.0.1:19543/')
-OUT=Path('/workspace/plato-cave/game-export/t2067u-quotes/browser-build8');OUT.mkdir(parents=True,exist_ok=True)
+OUT=Path('/workspace/plato-cave/game-export/t2067u-layout');OUT.mkdir(parents=True,exist_ok=True)
 async def main():
   res=[]
   def ok(n,c):res.append((n,bool(c)));print('PASS' if c else 'FAIL',n,flush=True)
@@ -151,10 +151,52 @@ async def main():
     await pg.evaluate('endGame()');ok('quote hidden at The End',not (await pg.evaluate(qv))['vis'])
     for lv in ['medium','hard']:
       await pg.evaluate('show("menu")');await pg.click('#'+lv+'Btn');await pg.wait_for_timeout(200);qq=await pg.evaluate(qv);ok(lv+' round shows Plato saying',qq['vis'] and 'Plato' in qq['by'])
-    await pg.set_viewport_size({'width':1280,'height':800});await pg.wait_for_timeout(200);await pg.screenshot(path=str(OUT/'quote-1280x800-guess.png'))
+    # Regression: the full italic saying AND gold line clear the actual projected
+    # art, not just other DOM controls. Exercise all sayings and multiple poses.
+    layout_cases=[(800,400,'easy','donut'),(800,400,'easy','cube'),
+                  (1280,800,'easy','ball'),(1280,800,'easy','donut'),
+                  (1280,800,'hard','washer'),(390,844,'easy','ball')]
+    layout_results=[]
+    for w,h,level,name in layout_cases:
+      await pg.set_viewport_size({'width':w,'height':h})
+      await pg.evaluate('''([level,name])=>{startGame(level);round=activeShapes.findIndex(s=>s.name===name);newRound();resize()}''',[level,name])
+      await pg.wait_for_timeout(200)
+      o=await pg.evaluate(ovl);ok(f'quote avoids #guess/#bar/#msg/#hud {w}x{h} {name}',not any(o.values()))
+      metrics=await pg.evaluate('''()=>{
+        const shape=activeShapes[round],original=round,rows=[];
+        // Instrument the real shadow/object paths, independent of fitLandscape.
+        const bounds=(ctx,draw)=>{let lo=Infinity,hi=-Infinity;const old={};
+          for(const key of ['moveTo','lineTo']){old[key]=ctx[key];ctx[key]=function(x,y){lo=Math.min(lo,y);hi=Math.max(hi,y);return old[key].call(this,x,y)}}
+          try{draw()}finally{for(const key in old)ctx[key]=old[key]}
+          return {top:lo,bottom:hi}};
+        for(let qi=0;qi<15;qi++){
+          round=qi;showQuote();const q=document.getElementById('quote'),qr=q.getBoundingClientRect(),origin=cv.getBoundingClientRect().top;
+          const by=document.getElementById('quoteBy').getBoundingClientRect(),text=document.getElementById('quoteText').getBoundingClientRect();
+          for(const time of [0,1000,4000,8000,20000]){
+            const shadow=bounds(sg,()=>drawShadow(shape,time));
+            const object=bounds(pg,()=>drawObject(shape,time,W/2,(H-150)/2+20,radius(Math.min(W,H-150)*.27)));
+            rows.push({qi,time,quoteBottom:qr.bottom-origin,shadow,object,
+              full:q.scrollHeight<=q.clientHeight+1&&by.bottom<=qr.bottom+.1&&text.top>=qr.top-.1,
+              by:document.getElementById('quoteBy').textContent,
+              bottomLimit:document.getElementById('msg').getBoundingClientRect().top-origin});
+          }
+        }
+        round=original;newRound();return rows
+      }''')
+      ok(f'full saying + exact gold attribution readable {w}x{h} {name}',all(r['full'] and r['by']=='— Plato, Republic' for r in metrics))
+      ok(f'quote has >=12px gap above shadow AND reveal across 15 sayings / 5 poses {w}x{h} {name}',all(min(r['shadow']['top'],r['object']['top'])-r['quoteBottom']>=12-0.1 for r in metrics))
+      if w>h:
+        ok(f'shadow + reveal stay above message {w}x{h} {name}',all(max(r['shadow']['bottom'],r['object']['bottom'])<=r['bottomLimit']-11.9 for r in metrics))
+      else:
+        ok('portrait retains original shadow and object scale/center',await pg.evaluate('''()=>{const p=[[0,-2],[0,2]],a=fitLandscape(p,wallScale(),(H-90)/2),b=fitLandscape(p,Math.min(W,H-150)*.27,(H-150)/2+20);return a.scale===wallScale()&&a.cy===(H-90)/2&&b.scale===Math.min(W,H-150)*.27&&b.cy===(H-150)/2+20}'''))
+      layout_results.append({'size':[w,h],'level':level,'name':name,'metrics':metrics})
+      await pg.wait_for_timeout(200);await pg.screenshot(path=str(OUT/f'{w}x{h}-{level}-{name}-guess.png'))
+      await pg.evaluate('__plato.submit("x")');await pg.wait_for_timeout(700);await pg.screenshot(path=str(OUT/f'{w}x{h}-{level}-{name}-reveal.png'))
+    (OUT/'layout-metrics.json').write_text(json.dumps(layout_results,indent=2))
+
     await pg.evaluate('endGame();show("start")');ok('quote hidden on Start',not (await pg.evaluate(qv))['vis'])
     await pg.set_viewport_size({'width':1280,'height':800})
-    keys=await pg.evaluate('caches.keys()');ok('build 8 cache installed', 'platocave-v8' in keys)
+    keys=await pg.evaluate('caches.keys()');ok('build 9 cache installed', 'platocave-v9' in keys)
     await c.set_offline(True);await pg.reload();await pg.wait_for_timeout(500);ok('works offline after first load',await pg.is_visible('#startBtn'))
     rr=await pg.evaluate('''async()=>{const r=await fetch('assets/intro.mp4',{headers:{range:'bytes=-4096'}});return {s:r.status,cr:r.headers.get('content-range'),size:(await r.arrayBuffer()).byteLength}}''')
     ok('offline seek byte range served from cached video',rr['s']==206 and rr['size']==4096 and rr['cr'].startswith('bytes '))
@@ -167,21 +209,21 @@ async def main():
     upgrade_ctx=await b.new_context();old=await upgrade_ctx.new_page();await old.goto(U)
     await old.evaluate('navigator.serviceWorker.ready');await old.reload();await old.wait_for_function('!!navigator.serviceWorker.controller')
     await old.evaluate('''async()=>{
-      const src=await caches.open('platocave-v8'),dst=await caches.open('platocave-v2');
+      const src=await caches.open('platocave-v9'),dst=await caches.open('platocave-v2');
       for(const req of await src.keys()){if(req.url.endsWith('__build_manifest__'))continue;
         const url=req.url.replace(/([?]v=)[0-9]+$/,(_,a)=>a+'2');await dst.put(url,await src.match(req))}
       const meta=await caches.open('platocave-vmeta');await meta.put('meta',new Response(JSON.stringify({current:'2'})));
       await navigator.serviceWorker.register('sw.js?r3-upgrade',{scope:'./'});
     }''')
-    await old.wait_for_function('''async()=>{const c=await caches.open('platocave-vmeta'),r=await c.match('meta'),m=await r.json();return m.current==='2'&&m.pending==='8'&&Object.values(m.pins||{}).includes('2')}''')
+    await old.wait_for_function('''async()=>{const c=await caches.open('platocave-vmeta'),r=await c.match('meta'),m=await r.json();return m.current==='2'&&m.pending==='9'&&Object.values(m.pins||{}).includes('2')}''')
     await old.wait_for_function('navigator.serviceWorker.controller.scriptURL.includes("r3-upgrade")')
     migration=await old.evaluate('''async()=>{const m=await (await (await caches.open('platocave-vmeta')).match('meta')).json();return {m,keys:await caches.keys()}}''')
-    ok('actual install pins unpinned legacy tab before claim; build 8 pending',migration['m']['current']=='2' and migration['m']['pending']=='8' and 'platocave-v2' in migration['keys'])
+    ok('actual install pins unpinned legacy tab before claim; build 9 pending',migration['m']['current']=='2' and migration['m']['pending']=='9' and 'platocave-v2' in migration['keys'])
     text=await old.evaluate('fetch("game.js?v=2").then(r=>r.text())')
     ok('legacy client still reads its v2 script key', 'const TITLE_TIME=23.0' in text)
     new=await upgrade_ctx.new_page();await new.goto(U);await new.wait_for_function('!!navigator.serviceWorker.controller')
     migration=await new.evaluate('''async()=>({m:await (await (await caches.open('platocave-vmeta')).match('meta')).json(),keys:await caches.keys()})''')
-    ok('actual next launch promotes 8 but retains old live cache',migration['m']['current']=='8' and 'platocave-v2' in migration['keys'] and '2' in migration['m']['pins'].values())
+    ok('actual next launch promotes 9 but retains old live cache',migration['m']['current']=='9' and 'platocave-v2' in migration['keys'] and '2' in migration['m']['pins'].values())
     await old.close();await new.reload()
     await new.wait_for_function('caches.keys().then(k=>!k.includes("platocave-v2"))')
     ok('actual cleanup reclaims legacy cache only after window closes',True)
