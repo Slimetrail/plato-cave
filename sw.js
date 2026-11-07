@@ -2,7 +2,7 @@
 // Each build gets its own cache PREFIX+build. A new build is downloaded in the background, written only when EVERY file
 // fetched OK, and marked "pending". The switch happens on the next launch (navigation), never mid-play; old caches are then deleted.
 const PREFIX="platocave-v",META=PREFIX+"meta";
-const SHELL=["./","index.html","style.css?v=1","shapes.js?v=1","sfx.js?v=1","game.js?v=1","manifest.webmanifest","icons/icon-192.png","icons/icon-512.png","icons/maskable-512.png","assets/cave-wall.jpg","assets/intro.mp4","assets/intro-music.mp3"];
+const SHELL=["./","index.html","style.css?v=2","shapes.js?v=2","sfx.js?v=1","game.js?v=2","manifest.webmanifest","icons/icon-192.png","icons/icon-512.png","icons/maskable-512.png","assets/cave-wall.jpg","assets/intro.mp4","assets/intro-music.mp3"];
 const VERSION_URL="version.json";
 async function getMeta(){try{const c=await caches.open(META),r=await c.match("meta");return r?await r.json():{}}catch(e){return {}}}
 async function setMeta(m){const c=await caches.open(META);await c.put("meta",new Response(JSON.stringify(m),{headers:{"content-type":"application/json"}}))}
@@ -13,8 +13,12 @@ async function download(build){const res=await Promise.all(SHELL.map(u=>fetch(ne
  await caches.delete(PREFIX+build);const c=await caches.open(PREFIX+build);for(let i=0;i<SHELL.length;i++)await c.put(SHELL[i],res[i]);
  if(!(await complete(build))){await caches.delete(PREFIX+build);throw new Error("incomplete")}}
 async function cleanup(m){const keep=new Set([META,PREFIX+m.current,PREFIX+m.pending]);for(const k of await caches.keys())if(k.startsWith(PREFIX)&&!keep.has(k))await caches.delete(k)}
-async function ranged(res,rg){const b=await res.blob(),m=/bytes=(\d*)-(\d*)/.exec(rg)||[];let a=m[1]?+m[1]:0,e=m[2]?+m[2]:b.size-1;if(!m[1]&&m[2]){a=b.size-+m[2];e=b.size-1}e=Math.min(e,b.size-1);
- return new Response(b.slice(a,e+1),{status:206,headers:{"content-type":res.headers.get("content-type")||"application/octet-stream","content-range":"bytes "+a+"-"+e+"/"+b.size,"content-length":String(e-a+1),"accept-ranges":"bytes"}})}
+async function ranged(res,rg){const b=await res.blob(),size=b.size,m=/^bytes=(\d*)-(\d*)$/.exec(rg.trim());
+ const invalid=()=>new Response(null,{status:416,headers:{"content-range":"bytes */"+size,"accept-ranges":"bytes","content-length":"0"}});
+ if(!m||(!m[1]&&!m[2])||!size)return invalid();
+ let a,e;if(!m[1]){const n=Number(m[2]);if(!Number.isSafeInteger(n)||n<=0)return invalid();a=Math.max(0,size-n);e=size-1}
+ else{a=Number(m[1]);e=m[2]?Number(m[2]):size-1;if(!Number.isSafeInteger(a)||!Number.isSafeInteger(e)||a>=size||e<a)return invalid();e=Math.min(e,size-1)}
+ return new Response(b.slice(a,e+1),{status:206,headers:{"content-type":res.headers.get("content-type")||"application/octet-stream","content-range":"bytes "+a+"-"+e+"/"+size,"content-length":String(e-a+1),"accept-ranges":"bytes"}})}
 let checking=null;
 function checkUpdate(){if(checking)return checking;checking=(async()=>{try{const b=await remoteBuild(),m=await getMeta();
   if(b===m.current||b===m.pending)return;await download(b);const m2=await getMeta();m2.pending=b;await setMeta(m2)}catch(e){/* silent: offline or broken update keeps the working build */try{const m=await getMeta();m.lastErr=String(e).slice(0,120);await setMeta(m)}catch(_){}}finally{checking=null}})();return checking}

@@ -33,6 +33,18 @@ function torus(R,r,a,b){a=a||28;b=b||12;const v=[],f=[];for(let i=0;i<a;i++){con
  for(let i=0;i<a;i++)for(let j=0;j<b;j++){const i2=(i+1)%a,j2=(j+1)%b,p=i*b+j,q=i2*b+j,s=i2*b+j2,t=i*b+j2;f.push([p,q,s]);f.push([p,s,t])}return M(v,f)}
 function star(n,r1,r2){const o=[];for(let i=0;i<2*n;i++){const a=PI/2+PI*i/n,r=i%2?r2:r1;o.push([r*Math.cos(a),r*Math.sin(a)])}return o}
 function heart(){const o=[];for(let i=0;i<48;i++){const t=2*PI*i/48;o.push([16*Math.pow(Math.sin(t),3)/16,(13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t))/16])}return o}
+// Rounded relief carving: inset rings give the wings real volume, not a flat bird cutout.
+function relief(poly,depth){const cx=poly.reduce((a,p)=>a+p[0],0)/poly.length,cy=poly.reduce((a,p)=>a+p[1],0)/poly.length,n=poly.length,v=[],f=[];
+ for(const [scale,z] of [[0.88,-depth/2],[1,0],[0.88,depth/2]])for(const p of poly)v.push([cx+(p[0]-cx)*scale,cy+(p[1]-cy)*scale,z]);
+ for(let r=0;r<2;r++)for(let i=0;i<n;i++){const j=(i+1)%n,a=r*n+i,b=r*n+j;f.push([a,b,b+n],[a,b+n,a+n])}
+ for(const t of earcut(area2(poly)>0?poly:poly.slice().reverse())){f.push(t.map(i=>i+2*n));f.push(t.slice().reverse())}return M(v,f)}
+function eagle(){const wing=[[0.16,0.30],[0.55,0.68],[1.65,0.88],[1.59,0.68],[1.43,0.53],[1.49,0.52],[1.28,0.33],[1.13,0.24],[1.17,0.23],[0.91,0.04],[0.52,-0.09],[0.18,-0.16]];
+ const right=relief(wing.slice().reverse(),0.24),left=xf(right,{s:[-1,1,1]});
+ const body=xf(lathe([[0,-0.62],[0.25,-0.58],[0.22,-0.25],[0.29,0.15],[0.25,0.55],[0.18,0.76],[0,0.83]],32),{s:[1,1,0.86],t:[0,0,0.07]});
+ const head=xf(sphere(1,24),{s:[0.20,0.26,0.21],t:[-0.025,0.78,0.08]});
+ const beak=xf(relief([[-0.13,0.85],[-0.37,0.77],[-0.29,0.63],[-0.20,0.74]],0.18),{t:[0,0,0.10]});
+ const tail=relief([[-0.18,-0.32],[-0.36,-0.86],[-0.16,-0.91],[0,-0.89],[0.16,-0.91],[0.36,-0.86],[0.18,-0.32]].reverse(),0.24);
+ return merge(right,left,tail,body,head,beak)}
 // [name, aliases, builder, sway] - ordered easy to hard (Jeremy: start with a ball and a cube)
 const DEFS=[
 ["ball",["sphere","orb","globe"],()=>sphere(1)],
@@ -73,7 +85,7 @@ const DEFS=[
 ["umbrella",["parasol"],()=>{const p=[];for(let i=0;i<=10;i++){const t=PI/2*i/10;p.push([1.2*Math.sin(t),0.9*Math.cos(t)-0.1])}p.push([0,-0.1]);const hook=[];for(let i=0;i<=10;i++){const a=PI+PI*i/10;hook.push([0.2+0.2*Math.cos(a),-1.1+0.2*Math.sin(a)])}for(let i=10;i>=0;i--){const a=PI+PI*i/10;hook.push([0.2+0.32*Math.cos(a),-1.1+0.32*Math.sin(a)])}
   return merge(lathe(p),xf(cyl(0.05,1.1),{t:[0,-0.55,0]}),extrude(hook,0.1))}],
 ["fish",[],()=>extrude([[1.2,0],[0.9,0.35],[0.3,0.55],[-0.3,0.4],[-0.75,0.05],[-1.2,0.5],[-1.05,0],[-1.2,-0.5],[-0.75,-0.05],[-0.3,-0.4],[0.3,-0.55],[0.9,-0.35]])],
-["bird",["dove","seagull","pigeon"],()=>extrude([[1.1,0.35],[0.8,0.5],[0.55,0.3],[0.2,0.15],[-0.3,0.9],[-0.45,0.85],[-0.4,0.05],[-1.1,0.15],[-0.75,-0.15],[-0.2,-0.3],[0.5,-0.2],[0.8,0.2]])],
+["bird",["dove","seagull","pigeon","eagle","carved eagle","wooden eagle"],eagle],
 ["boat",["ship","sailboat","sail boat"],()=>merge(extrude([[-1.3,-0.4],[1.3,-0.4],[0.9,-0.9],[-0.9,-0.9]],0.6),xf(box(0.08,1.8,0.08),{t:[0,0.5,0]}),extrude([[0.08,-0.2],[1,-0.2],[0.08,1.3]],0.05)),1],
 ["car",["auto","automobile"],()=>merge(extrude([[-1.3,-0.3],[1.3,-0.3],[1.3,0.15],[0.6,0.2],[0.3,0.7],[-0.6,0.7],[-0.9,0.2],[-1.3,0.15]],0.8),xf(cyl(0.3,0.9),{r:[PI/2,0,0],t:[-0.75,-0.35,0]}),xf(cyl(0.3,0.9),{r:[PI/2,0,0],t:[0.75,-0.35,0]})),1],
 ["rocket",["rocket ship","spaceship"],()=>merge(lathe([[0,-1],[0.4,-1],[0.45,0.2],[0.3,0.8],[0,1.3]]),extrude([[0.4,-1.1],[0.85,-1.3],[0.4,-0.3]],0.08),extrude([[-0.4,-1.1],[-0.4,-0.3],[-0.85,-1.3]],0.08))],
@@ -84,7 +96,9 @@ const DEFS=[
 ["letter h",["h"],()=>extrude([[-0.9,-1.1],[-0.5,-1.1],[-0.5,-0.2],[0.5,-0.2],[0.5,-1.1],[0.9,-1.1],[0.9,1.1],[0.5,1.1],[0.5,0.2],[-0.5,0.2],[-0.5,1.1],[-0.9,1.1]])],
 ["cloud",[],()=>merge(xf(sphere(0.6),{t:[-0.7,-0.1,0]}),xf(sphere(0.8),{t:[0,0.2,0]}),xf(sphere(0.6),{t:[0.75,-0.05,0]}),xf(box(2,0.6,0.8),{t:[0,-0.35,0]}))],
 ["flower",["daisy","rose"],()=>{const ms=[xf(box(0.12,1.4,0.12),{t:[0,-0.8,0]}),xf(cyl(0.25,0.2),{r:[PI/2,0,0],t:[0,0.4,0.05]})];for(let i=0;i<6;i++){const a=2*PI*i/6;ms.push(xf(sphere(1,12),{s:[0.42,0.2,0.1],r:[0,0,a],t:[0.45*Math.cos(a),0.4+0.45*Math.sin(a),0]}))}ms.push(xf(sphere(1,12),{s:[0.35,0.12,0.08],r:[0,0,0.5],t:[0.3,-0.7,0]}));return merge.apply(null,ms)}],
-["tower",["castle","castle tower","rook"],()=>{const ms=[cyl(0.6,2,16)];for(let i=0;i<4;i++){const a=PI/4+i*PI/2;ms.push(xf(box(0.32,0.35,0.32),{t:[0.45*Math.cos(a),1.15,0.45*Math.sin(a)]}))}return merge.apply(null,ms)},1],
+["tower",["castle","castle tower","rook"],()=>{const ms=[xf(cyl(0.78,1.45,32),{t:[0,-0.35,0]})];
+ // Deep, genuinely open gaps above the shaft; rear merlons align with front ones.
+ for(const x of [-0.59,0,0.59])for(const z of [-0.22,0.22])ms.push(xf(box(0.29,0.64,0.25),{t:[x,0.67,z]}));return merge.apply(null,ms)}],
 ["anchor",[],()=>{const arc=[];for(let i=0;i<=16;i++){const a=PI+PI*i/16;arc.push([0.85*Math.cos(a),-0.3+0.85*Math.sin(a)])}for(let i=16;i>=0;i--){const a=PI+PI*i/16;arc.push([0.62*Math.cos(a),-0.3+0.62*Math.sin(a)])}
   return merge(extrude(arc,0.15),xf(box(0.18,1.9,0.15),{t:[0,0.05,0]}),xf(box(0.9,0.15,0.15),{t:[0,0.6,0]}),xf(torus(0.2,0.07,16,6),{t:[0,1.15,0]}))}],
 ];
@@ -99,6 +113,9 @@ function pose(mesh,yaw,pitch){return mesh.v.map(p=>rotX(rotY(p,yaw),pitch))}
 function castShadow(verts,faces,light){// project every vertex of the mesh along the ray from the light onto the wall
  const P=verts.map(p=>{const t=(WALL_Z-light[2])/(p[2]-light[2]);return [light[0]+t*(p[0]-light[0]),light[1]+t*(p[1]-light[1])]});
  return {points:P,tris:faces}}
-const API={SHAPES:SHAPES,isCorrect:isCorrect,norm:norm,castShadow:castShadow,pose:pose,WALL_Z:WALL_Z,rotX:rotX,rotY:rotY};
+function article(name){return /^(?:[aeiou]|hour)/i.test(name)?"an":"a"}
+function displayPose(shape,t){let yaw=Math.sin(t*0.0006)*shape.sway+0.18,pitch=0.12+Math.sin(t*0.0004)*0.06;
+ if(shape.name==="cone"){pitch=0.48;yaw=0.18}if(shape.name==="pyramid"){yaw=0.60;pitch=0.31}if(shape.name==="tower"){yaw=0.05+Math.sin(t*0.0006)*0.04;pitch=0.06}return pose(shape.mesh,yaw,pitch)}
+const API={article,displayPose,SHAPES:SHAPES,isCorrect:isCorrect,norm:norm,castShadow:castShadow,pose:pose,WALL_Z:WALL_Z,rotX:rotX,rotY:rotY};
 if(typeof module!=="undefined"&&module.exports)module.exports=API;else root.PlatoShapes=API;
 })(typeof self!=="undefined"?self:this);
