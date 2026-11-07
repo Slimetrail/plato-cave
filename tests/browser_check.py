@@ -3,7 +3,7 @@ import asyncio,sys,os,json
 from pathlib import Path
 from playwright.async_api import async_playwright
 U=os.environ.get('PLATO_URL','http://127.0.0.1:19543/')
-OUT=Path('/workspace/plato-cave/game-export/r1-fixes');OUT.mkdir(parents=True,exist_ok=True)
+OUT=Path('/workspace/plato-cave/game-export/r2-fixes');OUT.mkdir(parents=True,exist_ok=True)
 async def main():
   res=[]
   def ok(n,c):res.append((n,bool(c)));print('PASS' if c else 'FAIL',n,flush=True)
@@ -33,10 +33,10 @@ async def main():
     await pg.click('#nextBtn');await pg.click('#goBtn');ok('empty guess ignored',(await pg.evaluate('__plato.state'))['phase']=='guess')
     for i in range(2,50):await pg.evaluate('__plato.submit("x");__plato.next()')
     ok('results after 50 rounds',await pg.is_visible('#end'))
-    for name in ['bird','tower','cone','pyramid']:
+    for name in ['ball','cube','ice cream','bird','sword','vase','egg','mushroom','tower','cone','pyramid']:
       await pg.evaluate('(name)=>{startGame();round=PlatoShapes.SHAPES.findIndex(s=>s.name===name);newRound()}',name)
-      await pg.wait_for_timeout(200);await pg.screenshot(path=str(OUT/f'{name}-shadow.png'))
-      await pg.evaluate('__plato.submit("x")');await pg.wait_for_timeout(700);await pg.screenshot(path=str(OUT/f'{name}-reveal.png'))
+      await pg.wait_for_timeout(200);await pg.screenshot(path=str(OUT/f"{name.replace(' ','-')}-shadow.png"))
+      await pg.evaluate('__plato.submit("x")');await pg.wait_for_timeout(700);await pg.screenshot(path=str(OUT/f"{name.replace(' ','-')}-reveal.png"))
     # Pretend keyboard: real offset + shrunk visual viewport, dispatched resize AND scroll.
     await pg.evaluate('''()=>{startGame();for(const [k,v] of Object.entries({width:390,height:320,offsetTop:140,offsetLeft:35}))Object.defineProperty(visualViewport,k,{configurable:true,get:()=>v});visualViewport.dispatchEvent(new Event('resize'));visualViewport.dispatchEvent(new Event('scroll'))}''')
     rect=await pg.evaluate('''()=>Object.fromEntries(['cv','msg','bar','hud'].map(id=>{const r=document.getElementById(id).getBoundingClientRect();return [id,{x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:r.width,height:r.height}]}))''')
@@ -47,7 +47,7 @@ async def main():
     await pg.reload();await pg.evaluate('''()=>{
       window.mockVideo={time:0,ready:4,paused:true,seeking:false,plays:0};
       for(const [key,field] of [['currentTime','time'],['readyState','ready'],['paused','paused'],['seeking','seeking']])Object.defineProperty(video,key,{configurable:true,get:()=>mockVideo[field],set:v=>mockVideo[field]=v});
-      Object.defineProperty(video,'duration',{configurable:true,get:()=>25.36});
+      Object.defineProperty(video,'duration',{configurable:true,get:()=>mockVideo.dur??25.36});Object.defineProperty(video,'seekable',{configurable:true,get:()=>({length:mockVideo.noseek?0:1,end:()=>mockVideo.dur??25.36})});
       video.play=()=>{mockVideo.paused=false;mockVideo.plays++;return Promise.resolve()};video.pause=()=>{mockVideo.paused=true};
       video.requestVideoFrameCallback=cb=>setTimeout(()=>cb(performance.now(),{mediaTime:mockVideo.time}),0);
       const realPlay=music.play.bind(music);window.musicCalls=0;music.play=()=>{musicCalls++;return musicCalls===1?Promise.reject(new Error('blocked unlock')):realPlay()};
@@ -67,7 +67,15 @@ async def main():
     ok('failed zero-time seek keeps playing, no title hint or black hold',await pg.evaluate('__plato.state.introState==="playing"&&!__plato.state.titleReady&&!video.paused&&!__plato.state.skipPending'))
     await pg.evaluate('mockVideo.time=25.36;mockVideo.ready=4;video.dispatchEvent(new Event("ended"))')
     ok('natural ended holds decoded title with music continuing',await pg.evaluate('__plato.state.introState==="hold"&&video.paused&&!music.paused'))
-    keys=await pg.evaluate('caches.keys()');ok('build 2 cache installed', 'platocave-v2' in keys)
+    await pg.evaluate('startIntro();mockVideo.time=3;mockVideo.noseek=true;mockVideo.dur=NaN;document.getElementById("skipBtn").click()')
+    ok('first uncached Skip is remembered and keeps playing (no black hold)',await pg.evaluate('__plato.state.introState==="playing"&&!video.paused&&!__plato.state.skipPending'))
+    await pg.evaluate('mockVideo.noseek=false;mockVideo.dur=25.36;video.dispatchEvent(new Event("progress"))')
+    ok('remembered Skip seeks once seekable',await pg.evaluate('__plato.state.skipPending&&Math.abs(mockVideo.time-25.24)<0.01'))
+    await pg.evaluate('video.dispatchEvent(new Event("seeked"))');await pg.wait_for_timeout(100)
+    ok('deferred Skip then holds decoded title',await pg.evaluate('__plato.state.introState==="hold"&&video.paused'))
+    await pg.evaluate('startIntro();for(let i=0;i<6;i++)document.getElementById("skipBtn").click();mockVideo.time=25.24;mockVideo.ready=4;video.dispatchEvent(new Event("seeked"))');await pg.wait_for_timeout(3800)
+    ok('rapid Skips: no stale fallback resumes after successful seek',await pg.evaluate('__plato.state.introState==="hold"&&video.paused'))
+    keys=await pg.evaluate('caches.keys()');ok('build 3 cache installed', 'platocave-v3' in keys)
     await c.set_offline(True);await pg.reload();await pg.wait_for_timeout(500);ok('works offline after first load',await pg.is_visible('#startBtn'))
     rr=await pg.evaluate('''async()=>{const r=await fetch('assets/intro.mp4',{headers:{range:'bytes=-4096'}});return {s:r.status,cr:r.headers.get('content-range'),size:(await r.arrayBuffer()).byteLength}}''')
     ok('offline seek byte range served from cached video',rr['s']==206 and rr['size']==4096 and rr['cr'].startswith('bytes '))

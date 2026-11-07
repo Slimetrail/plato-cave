@@ -1,18 +1,27 @@
 // Plato's Cave: offline cache + quiet updates (same pattern as Shark Attack). The build id lives in version.json, which is NEVER cached (always fetched with no-store).
 // Each build gets its own cache PREFIX+build. A new build is downloaded in the background, written only when EVERY file
-// fetched OK, and marked "pending". The switch happens on the next launch (navigation), never mid-play; old caches are then deleted.
+// fetched OK, and marked "pending". The switch happens on the next launch (navigation), never mid-play.
+// Session pin: every client (tab/PWA window) is pinned to the build it launched with and is served ONLY from that
+// build's cache. A new navigation may take a completed pending build; already-open clients keep their old cache,
+// which is deleted only after every client pinned to it has closed (checked with clients.matchAll).
 const PREFIX="platocave-v",META=PREFIX+"meta";
-const SHELL=["./","index.html","style.css?v=2","shapes.js?v=2","sfx.js?v=1","game.js?v=2","manifest.webmanifest","icons/icon-192.png","icons/icon-512.png","icons/maskable-512.png","assets/cave-wall.jpg","assets/intro.mp4","assets/intro-music.mp3"];
+const SHELL=["./","index.html","style.css?v=2","shapes.js?v=3","sfx.js?v=1","game.js?v=3","manifest.webmanifest","icons/icon-192.png","icons/icon-512.png","icons/maskable-512.png","assets/cave-wall.jpg","assets/intro.mp4","assets/intro-music.mp3"];
 const VERSION_URL="version.json";
+// Meta read-modify-writes are serialized so concurrent fetches cannot lose pins.
+let metaLock=Promise.resolve();function withMeta(fn){const p=metaLock.then(async()=>{const m=await getMeta();const r=await fn(m);await setMeta(m);return r});metaLock=p.catch(()=>{});return p}
 async function getMeta(){try{const c=await caches.open(META),r=await c.match("meta");return r?await r.json():{}}catch(e){return {}}}
 async function setMeta(m){const c=await caches.open(META);await c.put("meta",new Response(JSON.stringify(m),{headers:{"content-type":"application/json"}}))}
 async function remoteBuild(){const ac=new AbortController(),t=setTimeout(()=>ac.abort(),8000);let r;try{r=await fetch(VERSION_URL,{cache:"no-store",signal:ac.signal})}finally{clearTimeout(t)}if(!r.ok)throw new Error("version "+r.status);const j=await r.json();if(!j||!j.build)throw new Error("no build");return String(j.build)}
-async function complete(build){if(!build)return false;if(!(await caches.has(PREFIX+build)))return false;const c=await caches.open(PREFIX+build);for(const u of SHELL)if(!(await c.match(u,{ignoreSearch:true})))return false;return true}
+async function complete(build){if(!build)return false;if(!(await caches.has(PREFIX+build)))return false;const c=await caches.open(PREFIX+build);for(const u of SHELL)if(!(await c.match(u)))return false;return true}
 // all-or-nothing download: nothing is written unless every file came back 200
 async function download(build){const res=await Promise.all(SHELL.map(u=>fetch(new Request(u,{cache:"reload"})).then(r=>{if(!r.ok||r.status!==200)throw new Error(u+" "+r.status);return r})));
  await caches.delete(PREFIX+build);const c=await caches.open(PREFIX+build);for(let i=0;i<SHELL.length;i++)await c.put(SHELL[i],res[i]);
  if(!(await complete(build))){await caches.delete(PREFIX+build);throw new Error("incomplete")}}
-async function cleanup(m){const keep=new Set([META,PREFIX+m.current,PREFIX+m.pending]);for(const k of await caches.keys())if(k.startsWith(PREFIX)&&!keep.has(k))await caches.delete(k)}
+// Keep META, current, pending, and the pinned build of every still-open client; forget pins of closed clients.
+async function cleanup(m){let alive=null;try{alive=new Set((await self.clients.matchAll({includeUncontrolled:true,type:"all"})).map(c=>c.id))}catch(_){}
+ const pins=m.pins||{};if(alive)for(const id of Object.keys(pins))if(!alive.has(id))delete pins[id];m.pins=pins;
+ const keep=new Set([META,PREFIX+m.current,PREFIX+m.pending]);for(const id in pins)keep.add(PREFIX+pins[id]);
+ for(const k of await caches.keys())if(k.startsWith(PREFIX)&&!keep.has(k))await caches.delete(k)}
 async function ranged(res,rg){const b=await res.blob(),size=b.size,m=/^bytes=(\d*)-(\d*)$/.exec(rg.trim());
  const invalid=()=>new Response(null,{status:416,headers:{"content-range":"bytes */"+size,"accept-ranges":"bytes","content-length":"0"}});
  if(!m||(!m[1]&&!m[2])||!size)return invalid();
@@ -21,14 +30,23 @@ async function ranged(res,rg){const b=await res.blob(),size=b.size,m=/^bytes=(\d
  return new Response(b.slice(a,e+1),{status:206,headers:{"content-type":res.headers.get("content-type")||"application/octet-stream","content-range":"bytes "+a+"-"+e+"/"+size,"content-length":String(e-a+1),"accept-ranges":"bytes"}})}
 let checking=null;
 function checkUpdate(){if(checking)return checking;checking=(async()=>{try{const b=await remoteBuild(),m=await getMeta();
-  if(b===m.current||b===m.pending)return;await download(b);const m2=await getMeta();m2.pending=b;await setMeta(m2)}catch(e){/* silent: offline or broken update keeps the working build */try{const m=await getMeta();m.lastErr=String(e).slice(0,120);await setMeta(m)}catch(_){}}finally{checking=null}})();return checking}
-async function switchIfPending(){const m=await getMeta();if(m.pending&&m.pending!==m.current&&await complete(m.pending)){m.current=m.pending;delete m.pending;await setMeta(m);await cleanup(m)}else if(m.pending&&!(await complete(m.pending))){delete m.pending;await setMeta(m)}return m}
-self.addEventListener("install",e=>{e.waitUntil((async()=>{const m=await getMeta();if(!(await complete(m.current))){const b=await remoteBuild();await download(b);m.current=b;delete m.pending;await setMeta(m)}await self.skipWaiting()})())});
-self.addEventListener("activate",e=>{e.waitUntil((async()=>{const m=await getMeta();if(m.current)await cleanup(m);await self.clients.claim()})())});
+  if(b===m.current||b===m.pending)return;await download(b);await withMeta(m2=>{m2.pending=b})}catch(e){/* silent: offline or broken update keeps the working build */try{await withMeta(m=>{m.lastErr=String(e).slice(0,120)})}catch(_){}}finally{checking=null}})();return checking}
+// Next launch: promote a COMPLETE pending build for this new navigation and future launches. Nothing is deleted here;
+// cleanup() keeps every build an open client is still pinned to.
+async function switchIfPending(m){if(m.pending&&m.pending!==m.current&&await complete(m.pending)){m.current=m.pending;delete m.pending}else if(m.pending&&!(await complete(m.pending)))delete m.pending;return m}
+// Which build serves this request: the client's pin, or (new launch / first sight) the current build, then pinned.
+async function buildFor(e){const r=e.request,nav=r.mode==="navigate",id=nav?(e.resultingClientId||e.clientId||""):(e.clientId||"");
+ return withMeta(async m=>{m.pins=m.pins||{};if(!nav&&id&&m.pins[id])return m.pins[id];if(nav)await switchIfPending(m);if(id&&m.current)m.pins[id]=m.current;return m.current})}
+async function fromBuild(build,r){if(!build||!(await caches.has(PREFIX+build)))return null;const c=await caches.open(PREFIX+build);
+ // exact URL first, then ignoreSearch only inside the SAME pinned build's cache; never another build's cache
+ let hit=await c.match(r.url)||await c.match(r.url,{ignoreSearch:true});if(!hit&&r.mode==="navigate")hit=await c.match("index.html");return hit||null}
+self.addEventListener("install",e=>{e.waitUntil((async()=>{const m=await getMeta();if(!(await complete(m.current))){const b=await remoteBuild();await download(b);await withMeta(m2=>{m2.current=b;delete m2.pending})}await self.skipWaiting()})())});
+// claim() only takes control; claimed old tabs get pinned to the current (their own) build on their next request.
+self.addEventListener("activate",e=>{e.waitUntil((async()=>{await withMeta(async m=>{if(m.current)await cleanup(m)});await self.clients.claim()})())});
 self.addEventListener("message",e=>{if(e.data==="check")e.waitUntil(checkUpdate())});
 self.addEventListener("fetch",e=>{const r=e.request,u=new URL(r.url);if(r.method!=="GET"||u.origin!==location.origin)return;
  if(u.pathname.endsWith("/"+VERSION_URL)){e.respondWith(fetch(r,{cache:"no-store"}).catch(()=>new Response("{}",{status:503})));return}
- e.respondWith((async()=>{const m=r.mode==="navigate"?await switchIfPending():await getMeta();
-  if(m.current){const c=await caches.open(PREFIX+m.current);let hit=await c.match(r.url,{ignoreSearch:true});if(!hit&&r.mode==="navigate")hit=await c.match("index.html");if(hit){const rg=r.headers.get("range");if(rg&&hit.status===200)return ranged(hit,rg);return hit}}
+ e.respondWith((async()=>{const build=await buildFor(e),hit=await fromBuild(build,r);
+  if(hit){const rg=r.headers.get("range");if(rg&&hit.status===200)return ranged(hit,rg);return hit}
   return fetch(r)})());
- if(r.mode==="navigate")e.waitUntil(checkUpdate())});
+ if(r.mode==="navigate")e.waitUntil((async()=>{await checkUpdate();try{await withMeta(cleanup)}catch(_){}})())});

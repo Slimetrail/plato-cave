@@ -4,15 +4,15 @@ const screens=["start","intro","game","end"];function show(n){for(const s of scr
 const video=$("introVideo"),music=$("introMusic");
 // Title is fully readable at 23.0s (decoded frames inspected at 18..25s).
 const TITLE_TIME=23.0;
-let introState="idle",titleReady=false,musicNeedsUnlock=false,skipPending=false,seekTimer=0;
+let introState="idle",titleReady=false,musicNeedsUnlock=false,skipPending=false,skipWanted=false,seekTimer=0;
 function retryMusic(){if(!["playing","hold"].includes(introState))return;
  try{const p=music.play();if(p&&p.then)p.then(()=>{musicNeedsUnlock=false},()=>{musicNeedsUnlock=true})}catch(_){musicNeedsUnlock=true}}
 function markTitle(){if(video.currentTime>=TITLE_TIME&&video.readyState>=2){titleReady=true;$("tapHint").classList.add("on")}}
-function startIntro(){PlatoSfx.unlock();show("intro");introState="playing";titleReady=false;skipPending=false;clearTimeout(seekTimer);$("tapHint").classList.remove("on");$("skipBtn").style.display="";
+function startIntro(){PlatoSfx.unlock();show("intro");introState="playing";titleReady=false;skipPending=false;skipWanted=false;clearTimeout(seekTimer);$("tapHint").classList.remove("on");$("skipBtn").style.display="";
  video.currentTime=0;music.currentTime=0;music.volume=1;music.loop=true;
  const pv=video.play();if(pv&&pv.catch)pv.catch(()=>{/* Never freeze an undecoded/zero-time frame. A later gesture retries. */});retryMusic()}
 function toHold(){if(introState!=="playing"||video.currentTime<TITLE_TIME||video.readyState<2)return;
- markTitle();introState="hold";skipPending=false;clearTimeout(seekTimer);video.pause();$("skipBtn").style.display="none"}
+ markTitle();introState="hold";skipPending=false;skipWanted=false;clearTimeout(seekTimer);video.pause();$("skipBtn").style.display="none"}
 video.addEventListener("timeupdate",()=>{if(!skipPending&&introState==="playing")markTitle()});
 video.addEventListener("ended",toHold);
 function resumeIntro(){skipPending=false;clearTimeout(seekTimer);if(introState==="playing")video.play().catch(()=>{})}
@@ -22,10 +22,19 @@ video.addEventListener("seeked",()=>{if(!skipPending)return;
  if(!valid()){resumeIntro();return}
  if(video.requestVideoFrameCallback)video.requestVideoFrameCallback((_,meta)=>{if(valid()&&meta.mediaTime>=TITLE_TIME)toHold();else resumeIntro()});
  else requestAnimationFrame(()=>{if(valid())toHold();else resumeIntro()})});
-$("skipBtn").addEventListener("click",e=>{e.stopPropagation();retryMusic();
- if(!Number.isFinite(video.duration)||video.duration<TITLE_TIME){resumeIntro();return}
- skipPending=true;seekTimer=setTimeout(resumeIntro,3500);
- try{video.currentTime=video.duration-0.12}catch(_){resumeIntro()}});
+// Can we seek to the title yet? Needs a finite duration and (when reported) a seekable range reaching the title.
+function canSeekTitle(){if(!Number.isFinite(video.duration)||video.duration<TITLE_TIME)return false;const r=video.seekable;
+ return !!(r&&r.length&&r.end(r.length-1)>=Math.max(TITLE_TIME,video.duration-0.25))}
+// One safe seek-to-title attempt. Always clears the previous fallback timer first, so rapid Skips never leave a stale one.
+function trySkip(){if(introState!=="playing")return;clearTimeout(seekTimer);seekTimer=0;
+ if(!canSeekTitle()){/* not seekable yet (first uncached load): remember the request, keep playing, never hold black */
+  skipPending=false;skipWanted=true;if(video.paused)video.play().catch(()=>{});return}
+ skipWanted=false;skipPending=true;seekTimer=setTimeout(resumeIntro,3500);
+ try{video.currentTime=video.duration-0.12}catch(_){resumeIntro()}}
+// A remembered Skip is finished as soon as the file becomes seekable (metadata, buffered progress, SW finished caching).
+function retryWantedSkip(){if(skipWanted&&!skipPending&&introState==="playing"&&canSeekTitle())trySkip()}
+for(const ev of ["loadedmetadata","durationchange","progress","canplay","canplaythrough","timeupdate"])video.addEventListener(ev,retryWantedSkip);
+$("skipBtn").addEventListener("click",e=>{e.stopPropagation();retryMusic();trySkip()});
 $("intro").addEventListener("click",()=>{retryMusic();if(titleReady||introState==="hold")endIntro();else if(video.paused)video.play().catch(()=>{})});
 // Retry a rejected unlock on every later intro gesture, including a title/Skip tap.
 $("intro").addEventListener("pointerdown",retryMusic);
@@ -37,7 +46,44 @@ document.addEventListener("visibilitychange",()=>{if(document.hidden){music.paus
 // ---------- game ----------
 const cv=$("cv"),g=cv.getContext("2d"),wall=new Image();wall.src="assets/cave-wall.jpg";
 const sh=document.createElement("canvas"),sg=sh.getContext("2d");
-const PAL=[["#c9a26a","#8f6634","#4e3214"],["#b98552","#7d5028","#3f230d"],["#d6b88a","#9a7a4e","#54391b"],["#a8835a","#6d4e2c","#36230f"],["#c48d4a","#88561f","#45290b"]];
+// Painted substances, not one shared wood: [dark, mid, light, firelit highlight], specular strength, shininess, brush texture.
+const MATS={
+ wood:{c:["#37200f","#854a20","#c88a42","#f4c27a"],sp:.15,sh:8,tx:"wood"},
+ clay:{c:["#3a0f0a","#8e2a1a","#d2643a","#ffd6a6"],sp:.35,sh:14,tx:"paint"},
+ stone:{c:["#2b241d","#6e6255","#b9a991","#f3e3c4"],sp:.05,sh:4,tx:"stone"},
+ steel:{c:["#16181c","#4f555d","#b4bac1","#fff6e0"],sp:.95,sh:46,tx:"metal"},
+ gold:{c:["#3b2306","#8c5a12","#e2aa3a","#fff3bc"],sp:.85,sh:30,tx:"metal"},
+ copper:{c:["#2c1208","#7f3a1c","#d0793f","#ffe0b8"],sp:.75,sh:26,tx:"metal"},
+ crystal:{c:["#0b2033","#2c6c94","#8fd5ef","#ffffff"],sp:1.0,sh:60,tx:"glaze"},
+ glass:{c:["#0b2416","#2e6b43","#88c89b","#f6fff0"],sp:.9,sh:50,tx:"glaze"},
+ terracotta:{c:["#3a160a","#94431f","#da8b57","#ffe2c2"],sp:.45,sh:18,tx:"glaze"},
+ porcelain:{c:["#33363f","#8a8e9c","#e4e2dc","#ffffff"],sp:.7,sh:30,tx:"glaze"},
+ shell:{c:["#4a3c2e","#a8957c","#eedec2","#fffaf0"],sp:.3,sh:16,tx:"paint"},
+ snow:{c:["#36435a","#93a7c0","#e6edf5","#ffffff"],sp:.2,sh:10,tx:"paint"},
+ cream:{c:["#5a1f2a","#c96b7c","#f8c3c8","#fff6ef"],sp:.45,sh:16,tx:"cream"},
+ wafer:{c:["#4a2508","#a8641e","#e3a85b","#fbe3aa"],sp:.1,sh:6,tx:"wafer"},
+ candy:{c:["#3a0612","#a3122f","#f0506a","#fff0f0"],sp:.9,sh:40,tx:"glaze"},
+ wax:{c:["#4a3a20","#b9a170","#f2e3b9","#fffbe8"],sp:.35,sh:14,tx:"paint"},
+ flame:{c:["#7a2a00","#e06a10","#ffc040","#fffbd0"],sp:0,sh:4,tx:"none"},
+ leaf:{c:["#0e2010","#2c5a26","#71a046","#dbeaa2"],sp:.15,sh:8,tx:"paint"},
+ dough:{c:["#4a2a10","#a8682a","#e2aa62","#fff0c8"],sp:.25,sh:10,tx:"paint"},
+ traffic:{c:["#4a1402","#bf4718","#f4914f","#ffe2b4"],sp:.4,sh:16,tx:"paint"},
+ ruby:{c:["#30040c","#8a1022","#e04050","#ffe0e0"],sp:.6,sh:24,tx:"paint"},
+ ochre:{c:["#3f2a06","#9a6d18","#e3b649","#fff2c0"],sp:.25,sh:10,tx:"paint"},
+ indigo:{c:["#0e1230","#2c3a7a","#7486c8","#e8ecff"],sp:.3,sh:12,tx:"paint"},
+ lacquer:{c:["#2a0606","#8c1a14","#e05a3c","#fff0d8"],sp:.85,sh:36,tx:"glaze"},
+ moonstone:{c:["#262a36","#6c7488","#cdd3dd","#ffffff"],sp:.35,sh:14,tx:"stone"},
+ sail:{c:["#4a4034","#a8987e","#ece0c6","#fffaf0"],sp:.1,sh:6,tx:"paint"},
+ fish:{c:["#0f2630","#3a7488","#a6d0d6","#ffffff"],sp:.8,sh:32,tx:"metal"},
+ pollen:{c:["#4a2a00","#b8780a","#f2c23a","#fff6c0"],sp:.2,sh:8,tx:"paint"}};
+// Per-shape material by mesh part (shapes.js tags parts on one mesh). Only the carved bird and a few furniture/handles are wood.
+const OBJ_MATS={ball:["clay"],cube:["stone"],cone:["traffic"],cylinder:["copper"],pyramid:["stone"],donut:["dough"],star:["gold"],heart:["ruby"],diamond:["crystal"],moon:["moonstone"],
+ cross:["stone"],arrow:["ochre"],egg:["shell"],"triangle prism":["glass"],hexagon:["steel"],house:["terracotta"],tree:["leaf","wood"],mushroom:["clay","wax"],snowman:["snow"],
+ lollipop:["candy","sail"],"ice cream":["wafer","cream"],bell:["gold"],bottle:["glass"],vase:["terracotta"],cup:["porcelain"],dumbbell:["steel"],hourglass:["glass"],candle:["wax","flame","stone"],
+ table:["wood"],chair:["wood"],ladder:["wood"],key:["gold"],hammer:["steel","wood"],sword:["steel"],axe:["steel","wood"],umbrella:["indigo","wood"],fish:["fish"],bird:["wood"],
+ boat:["wood","sail"],car:["lacquer"],rocket:["steel"],lightning:["ochre"],crown:["gold"],"letter t":["stone"],"letter l":["terracotta"],"letter h":["moonstone"],cloud:["snow"],
+ flower:["ruby","pollen","leaf"],tower:["stone"],anchor:["steel"]};
+function matsFor(shape){return (OBJ_MATS[shape.name]||["clay"]).map(k=>MATS[k])}
 let round=0,score=0,phase="guess",t0=performance.now(),revealAt=0,lastResult=null,W=0,H=0,DPR=1;
 function resize(){DPR=Math.min(2,window.devicePixelRatio||1);const vv=window.visualViewport;
  W=vv?vv.width:innerWidth;H=vv?vv.height:innerHeight;const x=vv?vv.offsetLeft:0,y=vv?vv.offsetTop:0;
@@ -64,9 +110,11 @@ function drawShadow(shape,t){const L=light(t),v=poseOf(shape,t),s=S.castShadow(v
  for(const f of s.tris){const a=s.points[f[0]],b=s.points[f[1]],c=s.points[f[2]];sg.beginPath();sg.moveTo(cx+a[0]*k,cy-a[1]*k);sg.lineTo(cx+b[0]*k,cy-b[1]*k);sg.lineTo(cx+c[0]*k,cy-c[1]*k);sg.closePath();sg.fill();sg.stroke()}
  g.save();g.globalAlpha=0.9;g.globalCompositeOperation="multiply";g.filter="blur("+(2.5+Math.abs(flicker(t))*1.5)+"px)";g.drawImage(sh,0,0,W,H);g.restore();g.filter="none"}
 function hx(c){return [1,3,5].map(i=>parseInt(c.substr(i,2),16))}
-function shade(pal,d){const a=hx(pal[2]),b=hx(pal[1]),c=hx(pal[0]);const m=d<0.5?a.map((x,i)=>x+(b[i]-x)*d*2):b.map((x,i)=>x+(c[i]-x)*(d-0.5)*2);return "rgb("+m.map(Math.round).join(",")+")"}
-// Paint into a transparent layer: one soft exterior ink edge, continuous shading,
-// wood-grain brushwork clipped to the object, never black triangle wireframes.
+// value 0..1 = diffuse firelight (dark->mid->light), 1..1.4 = specular glint toward the hot highlight.
+function shade(mat,d){const c=mat.c.map(hx),v=Math.max(0,Math.min(1.4,d));let a,b,k;if(v<.5){a=c[0];b=c[1];k=v*2}else if(v<1){a=c[1];b=c[2];k=(v-.5)*2}else{a=c[2];b=c[3];k=(v-1)/.4}
+ return "rgb("+a.map((x,i)=>Math.round(x+(b[i]-x)*k)).join(",")+")"}
+// Paint into a transparent layer: one soft exterior ink edge, continuous shading, a substance-specific brush
+// texture per material part (wood only where the object is wood), warm firelight from below, no wireframes.
 const paint=document.createElement("canvas"),pg=paint.getContext("2d");
 const normalCache=new WeakMap();
 function vertexNormals(mesh){if(normalCache.has(mesh))return normalCache.get(mesh);
@@ -80,34 +128,55 @@ function vertexNormals(mesh){if(normalCache.has(mesh))return normalCache.get(mes
  const n=[u[1]*w[2]-u[2]*w[1],u[2]*w[0]-u[0]*w[2],u[0]*w[1]-u[1]*w[0]];
  for(const i of f){const key=keys[i],q=sums.get(key)||[0,0,0];sums.set(key,q.map((x,k)=>x+n[k]*(volumes.get(root(f[0]))<0?-1:1)))}}
  const out=keys.map(k=>{const n=sums.get(k),l=Math.hypot(...n)||1;return n.map(x=>x/l)});normalCache.set(mesh,out);return out}
+const tex=document.createElement("canvas"),tg=tex.getContext("2d"),mask=document.createElement("canvas"),mg=mask.getContext("2d");
+const HL=(()=>{const h=[-.28,-.65,1.70],l=Math.hypot(...h);return h.map(x=>x/l)})();
+function hash(n){const v=Math.sin(n*127.1+311.7)*43758.5453;return v-Math.floor(v)}
+// Substance brushwork, drawn into tg (already masked to that material's visible faces). Fixed seeds: no flicker.
+function brush(kind,cx,cy,size,mat){const left=cx-size*1.5,top=cy-size*1.5,S3=size*3;tg.lineCap="round";
+ if(kind==="wood"){for(let i=0;i<220;i++){const x=left+(i/220)*S3;tg.beginPath();for(let j=0;j<=32;j++){const y=top+j/32*S3,xx=x+Math.sin(j*.36+i*.17)*size*.012+Math.sin(j*.8+i)*size*.003;j?tg.lineTo(xx,y):tg.moveTo(xx,y)}
+  tg.strokeStyle=i%3?"rgba(58,26,9,.10)":"rgba(255,204,125,.09)";tg.lineWidth=i%7===0?2:.65;tg.stroke()}return}
+ if(kind==="stone"){for(let i=0;i<160;i++){const x=left+hash(i+3)*S3,y=top+hash(i+71)*S3,r=size*(.03+hash(i+9)*.09);tg.fillStyle=i%2?"rgba(30,24,18,.10)":"rgba(255,232,190,.08)";tg.beginPath();tg.ellipse(x,y,r,r*.7,hash(i)*3,0,7);tg.fill()}
+  tg.strokeStyle="rgba(25,18,12,.35)";tg.lineWidth=1;for(let i=0;i<5;i++){let x=left+size*(.8+hash(i+400)*1.4),y=top+size*(.6+hash(i+500)*1.6);tg.beginPath();tg.moveTo(x,y);for(let j=0;j<5;j++){x+=size*(hash(i*9+j)-.5)*.25;y+=size*.09;tg.lineTo(x,y)}tg.stroke()}return}
+ if(kind==="metal"){for(let i=0;i<14;i++){const x=left+size*(.6+hash(i+31)*1.8),w=size*(.02+hash(i+5)*.08);const gr=tg.createLinearGradient(x-w,0,x+w,0);gr.addColorStop(0,"rgba(255,240,210,0)");gr.addColorStop(.5,i%3?"rgba(255,226,170,.22)":"rgba(20,22,30,.25)");gr.addColorStop(1,"rgba(255,240,210,0)");tg.fillStyle=gr;tg.fillRect(x-w,top,2*w,S3)}
+  for(let i=0;i<90;i++){const x=left+hash(i+600)*S3,y=top+hash(i+700)*S3;tg.strokeStyle="rgba(255,250,235,.10)";tg.lineWidth=.6;tg.beginPath();tg.moveTo(x,y);tg.lineTo(x+size*.08,y+size*.01);tg.stroke()}return}
+ if(kind==="glaze"){for(let i=0;i<40;i++){const a=hash(i+90)*6.28,x=cx+Math.cos(a)*size*hash(i+3)*.9,y=cy+Math.sin(a)*size*hash(i+8)*.9;tg.strokeStyle=i%2?"rgba(255,245,225,.10)":"rgba(10,8,14,.08)";tg.lineWidth=size*.05;tg.beginPath();tg.arc(x,y,size*(.15+hash(i+1)*.3),a,a+.9);tg.stroke()}
+  const gl=tg.createRadialGradient(cx-size*.32,cy-size*.38,0,cx-size*.32,cy-size*.38,size*.32);gl.addColorStop(0,"rgba(255,255,248,.55)");gl.addColorStop(1,"rgba(255,255,248,0)");tg.fillStyle=gl;tg.fillRect(left,top,S3,S3);return}
+ if(kind==="cream"){for(let i=0;i<55;i++){const x=cx+(hash(i+5)-.5)*size*1.6,y=cy-size*.9+hash(i+15)*size*1.1;tg.strokeStyle=i%3?"rgba(255,250,244,.26)":"rgba(150,50,70,.16)";tg.lineWidth=size*(.02+hash(i)*.04);tg.beginPath();tg.arc(x,y,size*(.08+hash(i+2)*.22),3.3,5.9);tg.stroke()}return}
+ if(kind==="wafer"){tg.strokeStyle="rgba(70,32,6,.55)";tg.lineWidth=Math.max(1,size*.018);for(let i=-14;i<=14;i++){for(const s of [1,-1]){tg.beginPath();tg.moveTo(cx+i*size*.11-size,cy-size*1.5*s+size*.2);tg.lineTo(cx+i*size*.11+size,cy+size*1.5*s+size*.2);tg.stroke()}}
+  tg.fillStyle="rgba(255,226,160,.10)";for(let i=0;i<120;i++)tg.fillRect(left+hash(i+44)*S3,top+hash(i+55)*S3,2,2);return}
+ if(kind==="paint"){for(let i=0;i<160;i++){const x=left+hash(i+1)*S3,y=top+hash(i+912)*S3,l=size*(.05+hash(i+8)*.12),a=hash(i+77)*.8-.4;
+  tg.strokeStyle=i%2?"rgba(255,232,196,.07)":"rgba(30,14,8,.07)";tg.lineWidth=size*(.02+hash(i+44)*.04);tg.beginPath();tg.moveTo(x,y);tg.quadraticCurveTo(x+l*.5,y-l*.3+a*l,x+l,y+a*l);tg.stroke()}}}
 function drawObject(shape,t,cx,cy,size){
- if(paint.width!==cv.width||paint.height!==cv.height){paint.width=cv.width;paint.height=cv.height}
- pg.setTransform(DPR,0,0,DPR,0,0);pg.clearRect(0,0,W,H);
- const v=poseOf(shape,t),cam=7,pal=shape.name==="bird"?["#c88a42","#854a20","#37200f"]:PAL[shape.id%PAL.length];
+ for(const c of [paint,tex,mask])if(c.width!==cv.width||c.height!==cv.height){c.width=cv.width;c.height=cv.height}
+ pg.setTransform(DPR,0,0,DPR,0,0);pg.clearRect(0,0,W,H);tg.setTransform(DPR,0,0,DPR,0,0);
+ const v=poseOf(shape,t),cam=7,mats=matsFor(shape),part=i=>shape.mesh.t?shape.mesh.t[i]||0:0;
  const P=v.map(p=>{const s=cam/(cam-p[2]);return [cx+p[0]*s*size,cy-p[1]*s*size,p[2]]});
  // Rotate normals by exactly the object's pose (translation-free).
  const normals=S.displayPose({...shape,mesh:{v:vertexNormals(shape.mesh)}},t);
- const brightness=normals.map(n=>Math.min(1,Math.max(.08,.48+.42*(n[0]*-.28+n[1]*-.65+n[2]*.70))));
- const tris=shape.mesh.f.map(f=>({f,z:f.reduce((z,i)=>z+v[i][2],0)/3})).sort((a,b)=>a.z-b.z);
- const path=f=>{pg.beginPath();pg.moveTo(P[f[0]][0],P[f[0]][1]);pg.lineTo(P[f[1]][0],P[f[1]][1]);pg.lineTo(P[f[2]][0],P[f[2]][1]);pg.closePath()};
- for(const {f} of tris){const vals=f.map(i=>brightness[i]),pts=f.map(i=>P[i]);
+ // Fire is low and in front: diffuse from below plus a per-substance specular glint.
+ const diffuse=normals.map(n=>Math.min(1,Math.max(.08,.48+.42*(n[0]*-.28+n[1]*-.65+n[2]*.70))));
+ const spec=normals.map(n=>Math.max(0,n[0]*HL[0]+n[1]*HL[1]+n[2]*HL[2]));
+ const tris=shape.mesh.f.map((f,i)=>({f,i,z:f.reduce((z,k)=>z+v[k][2],0)/3})).sort((a,b)=>a.z-b.z);
+ const path=(c,f)=>{c.beginPath();c.moveTo(P[f[0]][0],P[f[0]][1]);c.lineTo(P[f[1]][0],P[f[1]][1]);c.lineTo(P[f[2]][0],P[f[2]][1]);c.closePath()};
+ for(const {f,i} of tris){const mat=mats[part(i)]||mats[0],vals=f.map(k=>diffuse[k]+mat.sp*.55*Math.pow(spec[k],mat.sh)),pts=f.map(k=>P[k]);
  // Fit a linear illumination field to all three vertices; smooth, unquantized pigment.
  const [a,b,c]=pts,[va,vb,vc]=vals,det=(b[0]-a[0])*(c[1]-a[1])-(c[0]-a[0])*(b[1]-a[1]);
- let fill=shade(pal,(va+vb+vc)/3);
+ let fill=shade(mat,(va+vb+vc)/3);
  if(Math.abs(det)>.1){const gx=((vb-va)*(c[1]-a[1])-(vc-va)*(b[1]-a[1]))/det,gy=((b[0]-a[0])*(vc-va)-(c[0]-a[0])*(vb-va))/det,gg=gx*gx+gy*gy;
  if(gg>.00000001){const lo=Math.min(...vals),hi=Math.max(...vals),x0=a[0]+gx*(lo-va)/gg,y0=a[1]+gy*(lo-va)/gg,x1=a[0]+gx*(hi-va)/gg,y1=a[1]+gy*(hi-va)/gg;
- if(hi-lo>.001){fill=pg.createLinearGradient(x0,y0,x1,y1);fill.addColorStop(0,shade(pal,lo));fill.addColorStop(1,shade(pal,hi))}}}
- pg.fillStyle=pg.strokeStyle=fill;pg.lineWidth=.65;path(f);pg.fill();pg.stroke()}
+ if(hi-lo>.001){fill=pg.createLinearGradient(x0,y0,x1,y1);fill.addColorStop(0,shade(mat,lo));fill.addColorStop(1,shade(mat,hi))}}}
+ pg.fillStyle=pg.strokeStyle=fill;pg.lineWidth=.65;path(pg,f);pg.fill();pg.stroke()}
+ // Each material part gets ITS OWN brushwork, masked to that part's visible (depth-sorted) faces.
+ mats.forEach((mat,k)=>{if(mat.tx==="none")return;mg.setTransform(DPR,0,0,DPR,0,0);mg.globalCompositeOperation="source-over";mg.clearRect(0,0,W,H);
+  for(const {f,i} of tris){mg.globalCompositeOperation=part(i)===k?"source-over":"destination-out";mg.fillStyle=mg.strokeStyle="#fff";mg.lineWidth=.8;path(mg,f);mg.fill();mg.stroke()}
+  tg.globalCompositeOperation="source-over";tg.clearRect(0,0,W,H);brush(mat.tx,cx,cy,size,mat);
+  tg.save();tg.setTransform(1,0,0,1,0,0);tg.globalCompositeOperation="destination-in";tg.drawImage(mask,0,0);tg.restore();
+  pg.save();pg.setTransform(1,0,0,1,0,0);pg.globalCompositeOperation="source-atop";pg.drawImage(tex,0,0);pg.restore()});
+ tg.globalCompositeOperation="source-over";
+ // Firelight glaze: cool umber up top, hot orange bounce from the fire below, a thin orange rim on the lower edge.
  pg.globalCompositeOperation="source-atop";
- // Translucent long, wandering dry-brush strokes and fine end-grain. Fixed seed, no flickering noise.
- const left=cx-size*1.5,top=cy-size*1.5;
- for(let i=0;i<220;i++){const x=left+(i/220)*size*3;pg.beginPath();
- for(let j=0;j<=32;j++){const y=top+j/32*size*3,xx=x+Math.sin(j*.36+i*.17)*size*.012+Math.sin(j*.8+i)*size*.003;if(!j)pg.moveTo(xx,y);else pg.lineTo(xx,y)}
- pg.strokeStyle=i%3?"rgba(58,26,9,.09)":"rgba(255,204,125,.08)";pg.lineWidth=i%7===0?2.0:.65;pg.stroke()}
- // Scumbled pigment flecks break up the mathematical gradients like a dry brush.
- for(let i=0;i<850;i++){const hash=n=>{const v=Math.sin(n*127.1+311.7)*43758.5453;return v-Math.floor(v)},x=left+hash(i+1)*size*3,y=top+hash(i+912)*size*3;
- pg.strokeStyle=i%2?"rgba(255,186,98,.045)":"rgba(49,24,11,.05)";pg.lineWidth=.8+hash(i+44)*2.2;pg.beginPath();pg.moveTo(x,y);pg.lineTo(x+2+hash(i+8)*6,y-1-hash(i+75)*4);pg.stroke()}
- const glaze=pg.createLinearGradient(0,cy-size,0,cy+size);glaze.addColorStop(0,"rgba(17,12,9,.27)");glaze.addColorStop(.55,"rgba(129,64,18,0)");glaze.addColorStop(1,"rgba(255,145,45,.23)");pg.fillStyle=glaze;pg.fillRect(0,0,W,H);
+ const glaze=pg.createLinearGradient(0,cy-size*1.2,0,cy+size*1.2);glaze.addColorStop(0,"rgba(20,14,24,.30)");glaze.addColorStop(.5,"rgba(129,64,18,0)");glaze.addColorStop(1,"rgba(255,140,40,.28)");pg.fillStyle=glaze;pg.fillRect(0,0,W,H);
+ const bloom=pg.createRadialGradient(cx,cy+size*1.4,0,cx,cy+size*1.4,size*1.6);bloom.addColorStop(0,"rgba(255,170,70,.22)");bloom.addColorStop(1,"rgba(255,170,70,0)");pg.fillStyle=bloom;pg.fillRect(0,0,W,H);
  pg.globalCompositeOperation="source-over";
  // Wing feather incisions and a tiny carved eye, projected with the very same pose.
  if(shape.name==="bird"){

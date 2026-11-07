@@ -4,12 +4,16 @@
 "use strict";
 const PI=Math.PI;
 function M(v,f){return {v:v,f:f}}
-function merge(){const v=[],f=[];for(const m of arguments){const o=v.length;for(const p of m.v)v.push(p.slice());for(const t of m.f)f.push([t[0]+o,t[1]+o,t[2]+o])}return M(v,f)}
+// m.t (optional) = per-face material part index, kept through merge/xf/fit so the reveal can paint
+// different substances (wafer vs cream, iron head vs wooden handle) on ONE mesh. Shadows ignore it.
+function merge(){const v=[],f=[],t=[];for(const m of arguments){const o=v.length;for(const p of m.v)v.push(p.slice());m.f.forEach((q,i)=>{f.push([q[0]+o,q[1]+o,q[2]+o]);t.push(m.t?m.t[i]:0)})}const r=M(v,f);if(t.some(x=>x))r.t=t;return r}
+function tag(m,k){m.t=m.f.map(()=>k);return m}
 function rotX(p,a){const c=Math.cos(a),s=Math.sin(a);return [p[0],p[1]*c-p[2]*s,p[1]*s+p[2]*c]}
 function rotY(p,a){const c=Math.cos(a),s=Math.sin(a);return [p[0]*c+p[2]*s,p[1],-p[0]*s+p[2]*c]}
 function rotZ(p,a){const c=Math.cos(a),s=Math.sin(a);return [p[0]*c-p[1]*s,p[0]*s+p[1]*c,p[2]]}
 function xf(m,o){o=o||{};const s=o.s===undefined?[1,1,1]:(typeof o.s==="number"?[o.s,o.s,o.s]:o.s),r=o.r||[0,0,0],t=o.t||[0,0,0];
- return M(m.v.map(p=>{let q=[p[0]*s[0],p[1]*s[1],p[2]*s[2]];q=rotX(q,r[0]);q=rotY(q,r[1]);q=rotZ(q,r[2]);return [q[0]+t[0],q[1]+t[1],q[2]+t[2]]}),m.f.map(x=>x.slice()))}
+ return keepT(m,M(m.v.map(p=>{let q=[p[0]*s[0],p[1]*s[1],p[2]*s[2]];q=rotX(q,r[0]);q=rotY(q,r[1]);q=rotZ(q,r[2]);return [q[0]+t[0],q[1]+t[1],q[2]+t[2]]}),m.f.map(x=>x.slice())))}
+function keepT(a,b){if(a.t)b.t=a.t.slice();return b}
 function area2(p){let a=0;for(let i=0;i<p.length;i++){const q=p[i],r=p[(i+1)%p.length];a+=q[0]*r[1]-r[0]*q[1]}return a/2}
 function inTri(p,a,b,c){const d=(u,v,w)=>(u[0]-w[0])*(v[1]-w[1])-(v[0]-w[0])*(u[1]-w[1]);const d1=d(p,a,b),d2=d(p,b,c),d3=d(p,c,a);return !((d1<0||d2<0||d3<0)&&(d1>0||d2>0||d3>0))}
 function earcut(pts){const idx=pts.map((_,i)=>i),out=[];let guard=0;
@@ -45,6 +49,13 @@ function eagle(){const wing=[[0.16,0.30],[0.55,0.68],[1.65,0.88],[1.59,0.68],[1.
  const beak=xf(relief([[-0.13,0.85],[-0.37,0.77],[-0.29,0.63],[-0.20,0.74]],0.18),{t:[0,0,0.10]});
  const tail=relief([[-0.18,-0.32],[-0.36,-0.86],[-0.16,-0.91],[0,-0.89],[0.16,-0.91],[0.36,-0.86],[0.18,-0.32]].reverse(),0.24);
  return merge(right,left,tail,body,head,beak)}
+// Ice cream: ridged waffle cone (part 0) + an overhanging, rippled cream scoop with a melt drip (part 1).
+function icecream(){const prof=[[0,-1.25]];for(let i=1;i<=12;i++){const y=-1.25+i*0.105,r=0.55*(i/12);prof.push([r+(i%2?0.035:0),y])}prof.push([0.6,0.05],[0,0.05]);
+ const wafer=lathe(prof,24),sp=[];for(let i=0;i<=12;i++){const a=PI*i/12;sp.push([0.74*Math.sin(a),-0.7*Math.cos(a)])}
+ const scoop=lathe(sp,28);scoop.v=scoop.v.map(p=>{const a=Math.atan2(p[2],p[0]),w=p[1]<-0.2?1+0.09*Math.sin(a*7):1;return [p[0]*w,p[1]+0.62,p[2]*w]});
+ const lip=xf(torus(0.66,0.13,28,10),{r:[PI/2,0,0],t:[0,0.1,0]});lip.v=lip.v.map(p=>{const a=Math.atan2(p[2],p[0]);return [p[0],p[1]+0.05*Math.sin(a*6),p[2]]});
+ const drip=xf(sphere(1,12),{s:[0.11,0.2,0.11],t:[0.42,-0.12,0.32]});
+ return merge(wafer,tag(scoop,1),tag(lip,1),tag(drip,1))}
 // [name, aliases, builder, sway] - ordered easy to hard (Jeremy: start with a ball and a cube)
 const DEFS=[
 ["ball",["sphere","orb","globe"],()=>sphere(1)],
@@ -63,30 +74,30 @@ const DEFS=[
 ["triangle prism",["prism","triangular prism","wedge"],()=>xf(extrude([[-1,-0.8],[1,-0.8],[0,0.9]],1.2),{r:[0,0.5,0]}),1],
 ["hexagon",["hexagon prism","hex","hexagonal prism","nut"],()=>extrude(circ(6,1),0.5)],
 ["house",["home","hut"],()=>merge(extrude([[-1,-1],[1,-1],[1,0.2],[0,1.1],[-1,0.2]]),xf(box(0.3,0.6,0.3),{t:[0.55,0.75,0]}))],
-["tree",["pine","pine tree","christmas tree"],()=>merge(cone(0.9,1.2),xf(cone(0.7,1),{t:[0,0.65,0]}),xf(cyl(0.2,0.6),{t:[0,-0.85,0]}))],
-["mushroom",["toadstool"],()=>merge(lathe([[0,0.2],[1.1,0.2],[0.9,0.6],[0.5,0.9],[0,1]]),cyl(0.3,1.4))],
+["tree",["pine","pine tree","christmas tree"],()=>merge(cone(0.9,1.2),xf(cone(0.7,1),{t:[0,0.65,0]}),tag(xf(cyl(0.2,0.6),{t:[0,-0.85,0]}),1))],
+["mushroom",["toadstool"],()=>merge(lathe([[0,0.2],[1.1,0.2],[0.9,0.6],[0.5,0.9],[0,1]]),tag(cyl(0.3,1.4),1))],
 ["snowman",["snow man"],()=>merge(xf(sphere(0.8),{t:[0,-0.8,0]}),xf(sphere(0.55),{t:[0,0.3,0]}),xf(sphere(0.38),{t:[0,1.1,0]}))],
-["lollipop",["lolly","sucker","candy"],()=>merge(xf(cyl(0.75,0.25),{r:[PI/2,0,0],t:[0,0.6,0]}),xf(cyl(0.08,1.8),{t:[0,-0.7,0]})),1],
-["ice cream",["ice cream cone","icecream","cone of ice cream"],()=>merge(xf(cone(0.6,1.5),{r:[PI,0,0],t:[0,-0.55,0]}),xf(sphere(0.65),{t:[0,0.4,0]}))],
+["lollipop",["lolly","sucker","candy"],()=>merge(xf(cyl(0.75,0.25),{r:[PI/2,0,0],t:[0,0.6,0]}),tag(xf(cyl(0.08,1.8),{t:[0,-0.7,0]}),1)),1],
+["ice cream",["ice cream cone","icecream","cone of ice cream"],icecream],
 ["bell",[],()=>lathe([[0,1],[0.18,1],[0.28,0.85],[0.35,0.5],[0.45,0],[0.65,-0.5],[0.9,-0.8],[0.95,-0.9],[0,-0.9]])],
 ["bottle",[],()=>lathe([[0,-1.2],[0.6,-1.2],[0.6,0.1],[0.25,0.6],[0.22,1.1],[0.28,1.2],[0,1.2]])],
 ["vase",["pot","jar","urn"],()=>lathe([[0,-1],[0.45,-1],[0.85,-0.4],[0.8,0.2],[0.4,0.7],[0.6,1.05],[0,1.05]])],
 ["cup",["mug"],()=>merge(lathe([[0,-0.8],[0.6,-0.8],[0.65,0.8],[0,0.8]]),xf(torus(0.38,0.09,20,8),{t:[0.7,0,0]})),1],
 ["dumbbell",["weight","barbell"],()=>merge(xf(cyl(0.12,1.8),{r:[0,0,PI/2]}),xf(sphere(0.5),{t:[-1,0,0]}),xf(sphere(0.5),{t:[1,0,0]}))],
 ["hourglass",["sand timer","egg timer"],()=>lathe([[0,-1.2],[0.8,-1.2],[0.75,-1],[0.12,0],[0.75,1],[0.8,1.2],[0,1.2]])],
-["candle",[],()=>merge(cyl(0.35,1.6),xf(lathe([[0,-0.2],[0.18,0],[0,0.45]]),{t:[0,1,0]}),xf(cyl(0.03,0.2),{t:[0,0.85,0]}))],
+["candle",[],()=>merge(cyl(0.35,1.6),tag(xf(lathe([[0,-0.2],[0.18,0],[0,0.45]]),{t:[0,1,0]}),1),tag(xf(cyl(0.03,0.2),{t:[0,0.85,0]}),2))],
 ["table",["desk"],()=>merge(box(2,0.15,0.8),xf(box(0.15,1,0.15),{t:[-0.85,-0.55,0]}),xf(box(0.15,1,0.15),{t:[0.85,-0.55,0]})),1],
 ["chair",["seat","stool"],()=>merge(box(1,0.12,0.9),xf(box(0.12,1,0.12),{t:[-0.44,-0.55,0]}),xf(box(0.12,1,0.12),{t:[0.44,-0.55,0]}),xf(box(0.12,1.1,0.9),{t:[-0.44,0.6,0]})),1],
 ["ladder",[],()=>{const ms=[xf(box(0.12,2.4,0.12),{t:[-0.5,0,0]}),xf(box(0.12,2.4,0.12),{t:[0.5,0,0]})];for(let i=0;i<5;i++)ms.push(xf(box(1,0.1,0.1),{t:[0,-0.9+i*0.45,0]}));return merge.apply(null,ms)},1],
 ["key",[],()=>merge(xf(torus(0.38,0.12,20,8),{t:[-0.9,0,0]}),xf(box(1.6,0.18,0.15),{t:[0.2,0,0]}),xf(box(0.15,0.4,0.15),{t:[0.8,-0.25,0]}),xf(box(0.15,0.3,0.15),{t:[0.5,-0.2,0]})),1],
-["hammer",["mallet"],()=>merge(xf(box(0.2,2,0.2),{t:[0,-0.3,0]}),xf(extrude([[-0.9,0.65],[0.5,0.65],[0.5,1.15],[-0.7,1.15],[-0.9,1.0]],0.4),{})),1],
+["hammer",["mallet"],()=>merge(tag(xf(box(0.2,2,0.2),{t:[0,-0.3,0]}),1),xf(extrude([[-0.9,0.65],[0.5,0.65],[0.5,1.15],[-0.7,1.15],[-0.9,1.0]],0.4),{})),1],
 ["sword",["blade","knife"],()=>extrude([[-0.08,-1.3],[0.08,-1.3],[0.08,-0.8],[0.45,-0.8],[0.45,-0.65],[0.15,-0.65],[0.15,1.0],[0,1.35],[-0.15,1.0],[-0.15,-0.65],[-0.45,-0.65],[-0.45,-0.8],[-0.08,-0.8]],0.15)],
-["axe",["ax","hatchet"],()=>merge(xf(box(0.18,2.2,0.18),{}),extrude([[0.05,0.3],[0.8,0.1],[0.95,0.6],[0.8,1.1],[0.05,0.9]],0.12)),1],
+["axe",["ax","hatchet"],()=>merge(tag(xf(box(0.18,2.2,0.18),{}),1),extrude([[0.05,0.3],[0.8,0.1],[0.95,0.6],[0.8,1.1],[0.05,0.9]],0.12)),1],
 ["umbrella",["parasol"],()=>{const p=[];for(let i=0;i<=10;i++){const t=PI/2*i/10;p.push([1.2*Math.sin(t),0.9*Math.cos(t)-0.1])}p.push([0,-0.1]);const hook=[];for(let i=0;i<=10;i++){const a=PI+PI*i/10;hook.push([0.2+0.2*Math.cos(a),-1.1+0.2*Math.sin(a)])}for(let i=10;i>=0;i--){const a=PI+PI*i/10;hook.push([0.2+0.32*Math.cos(a),-1.1+0.32*Math.sin(a)])}
-  return merge(lathe(p),xf(cyl(0.05,1.1),{t:[0,-0.55,0]}),extrude(hook,0.1))}],
+  return merge(lathe(p),tag(xf(cyl(0.05,1.1),{t:[0,-0.55,0]}),1),tag(extrude(hook,0.1),1))}],
 ["fish",[],()=>extrude([[1.2,0],[0.9,0.35],[0.3,0.55],[-0.3,0.4],[-0.75,0.05],[-1.2,0.5],[-1.05,0],[-1.2,-0.5],[-0.75,-0.05],[-0.3,-0.4],[0.3,-0.55],[0.9,-0.35]])],
 ["bird",["dove","seagull","pigeon","eagle","carved eagle","wooden eagle"],eagle],
-["boat",["ship","sailboat","sail boat"],()=>merge(extrude([[-1.3,-0.4],[1.3,-0.4],[0.9,-0.9],[-0.9,-0.9]],0.6),xf(box(0.08,1.8,0.08),{t:[0,0.5,0]}),extrude([[0.08,-0.2],[1,-0.2],[0.08,1.3]],0.05)),1],
+["boat",["ship","sailboat","sail boat"],()=>merge(extrude([[-1.3,-0.4],[1.3,-0.4],[0.9,-0.9],[-0.9,-0.9]],0.6),xf(box(0.08,1.8,0.08),{t:[0,0.5,0]}),tag(extrude([[0.08,-0.2],[1,-0.2],[0.08,1.3]],0.05),1)),1],
 ["car",["auto","automobile"],()=>merge(extrude([[-1.3,-0.3],[1.3,-0.3],[1.3,0.15],[0.6,0.2],[0.3,0.7],[-0.6,0.7],[-0.9,0.2],[-1.3,0.15]],0.8),xf(cyl(0.3,0.9),{r:[PI/2,0,0],t:[-0.75,-0.35,0]}),xf(cyl(0.3,0.9),{r:[PI/2,0,0],t:[0.75,-0.35,0]})),1],
 ["rocket",["rocket ship","spaceship"],()=>merge(lathe([[0,-1],[0.4,-1],[0.45,0.2],[0.3,0.8],[0,1.3]]),extrude([[0.4,-1.1],[0.85,-1.3],[0.4,-0.3]],0.08),extrude([[-0.4,-1.1],[-0.4,-0.3],[-0.85,-1.3]],0.08))],
 ["lightning",["lightning bolt","bolt","thunderbolt","thunder"],()=>extrude([[0.2,1.3],[-0.6,0],[0,0],[-0.4,-1.3],[0.7,0.25],[0.1,0.25],[0.6,1.3]].reverse())],
@@ -95,7 +106,7 @@ const DEFS=[
 ["letter l",["l"],()=>extrude([[-0.6,-1.1],[0.8,-1.1],[0.8,-0.7],[-0.2,-0.7],[-0.2,1.1],[-0.6,1.1]])],
 ["letter h",["h"],()=>extrude([[-0.9,-1.1],[-0.5,-1.1],[-0.5,-0.2],[0.5,-0.2],[0.5,-1.1],[0.9,-1.1],[0.9,1.1],[0.5,1.1],[0.5,0.2],[-0.5,0.2],[-0.5,1.1],[-0.9,1.1]])],
 ["cloud",[],()=>merge(xf(sphere(0.6),{t:[-0.7,-0.1,0]}),xf(sphere(0.8),{t:[0,0.2,0]}),xf(sphere(0.6),{t:[0.75,-0.05,0]}),xf(box(2,0.6,0.8),{t:[0,-0.35,0]}))],
-["flower",["daisy","rose"],()=>{const ms=[xf(box(0.12,1.4,0.12),{t:[0,-0.8,0]}),xf(cyl(0.25,0.2),{r:[PI/2,0,0],t:[0,0.4,0.05]})];for(let i=0;i<6;i++){const a=2*PI*i/6;ms.push(xf(sphere(1,12),{s:[0.42,0.2,0.1],r:[0,0,a],t:[0.45*Math.cos(a),0.4+0.45*Math.sin(a),0]}))}ms.push(xf(sphere(1,12),{s:[0.35,0.12,0.08],r:[0,0,0.5],t:[0.3,-0.7,0]}));return merge.apply(null,ms)}],
+["flower",["daisy","rose"],()=>{const ms=[tag(xf(box(0.12,1.4,0.12),{t:[0,-0.8,0]}),2),tag(xf(cyl(0.25,0.2),{r:[PI/2,0,0],t:[0,0.4,0.05]}),1)];for(let i=0;i<6;i++){const a=2*PI*i/6;ms.push(xf(sphere(1,12),{s:[0.42,0.2,0.1],r:[0,0,a],t:[0.45*Math.cos(a),0.4+0.45*Math.sin(a),0]}))}ms.push(xf(sphere(1,12),{s:[0.35,0.12,0.08],r:[0,0,0.5],t:[0.3,-0.7,0]}));return merge.apply(null,ms)}],
 ["tower",["castle","castle tower","rook"],()=>{const ms=[xf(cyl(0.78,1.45,32),{t:[0,-0.35,0]})];
  // Deep, genuinely open gaps above the shaft; rear merlons align with front ones.
  for(const x of [-0.59,0,0.59])for(const z of [-0.22,0.22])ms.push(xf(box(0.29,0.64,0.25),{t:[x,0.67,z]}));return merge.apply(null,ms)}],
@@ -103,7 +114,7 @@ const DEFS=[
   return merge(extrude(arc,0.15),xf(box(0.18,1.9,0.15),{t:[0,0.05,0]}),xf(box(0.9,0.15,0.15),{t:[0,0.6,0]}),xf(torus(0.2,0.07,16,6),{t:[0,1.15,0]}))}],
 ];
 function fit(m){let c=[0,0,0],R=0;const lo=[1e9,1e9,1e9],hi=[-1e9,-1e9,-1e9];for(const p of m.v)for(let k=0;k<3;k++){lo[k]=Math.min(lo[k],p[k]);hi[k]=Math.max(hi[k],p[k])}
- c=[0,1,2].map(k=>(lo[k]+hi[k])/2);for(const p of m.v)R=Math.max(R,Math.hypot(p[0]-c[0],p[1]-c[1],p[2]-c[2]));const s=1.25/R;return M(m.v.map(p=>[(p[0]-c[0])*s,(p[1]-c[1])*s,(p[2]-c[2])*s]),m.f)}
+ c=[0,1,2].map(k=>(lo[k]+hi[k])/2);for(const p of m.v)R=Math.max(R,Math.hypot(p[0]-c[0],p[1]-c[1],p[2]-c[2]));const s=1.25/R;return keepT(m,M(m.v.map(p=>[(p[0]-c[0])*s,(p[1]-c[1])*s,(p[2]-c[2])*s]),m.f))}
 const SHAPES=DEFS.map((d,i)=>({id:i,name:d[0],aliases:d[1],sway:d[3]?0.45:0.25,mesh:fit(d[2]())}));
 function norm(s){return String(s||"").toLowerCase().replace(/[^a-z ]/g," ").replace(/\s+/g," ").trim().replace(/^(a|an|the|its|it s|it is|is it) /,"").replace(/^(a|an|the) /,"").replace(/s$/,"")}
 function isCorrect(shape,guess){const g=norm(guess);if(!g)return false;return [shape.name].concat(shape.aliases).some(a=>norm(a)===g)}
