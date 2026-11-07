@@ -5,7 +5,7 @@
 // build's cache. A new navigation may take a completed pending build; already-open clients keep their old cache,
 // which is deleted only after every client pinned to it has closed (checked with clients.matchAll).
 const PREFIX="platocave-v",META=PREFIX+"meta";
-const SHELL=["./","index.html","style.css?v=3","shapes.js?v=6","sfx.js?v=2","game.js?v=7","manifest.webmanifest","icons/icon-192.png","icons/icon-512.png","icons/maskable-512.png","assets/cave-wall.jpg","assets/intro.mp4","assets/intro-music.mp3"];
+const SHELL=["./","index.html","style.css?v=4","shapes.js?v=6","sfx.js?v=2","quotes.js?v=1","game.js?v=8","manifest.webmanifest","icons/icon-192.png","icons/icon-512.png","icons/maskable-512.png","assets/cave-wall.jpg","assets/intro.mp4","assets/intro-music.mp3"];
 const VERSION_URL="version.json";
 // Meta read-modify-writes are serialized so concurrent fetches cannot lose pins.
 let metaLock=Promise.resolve();function withMeta(fn){const p=metaLock.then(async()=>{const m=await getMeta();const r=await fn(m);await setMeta(m);return r});metaLock=p.catch(()=>{});return p}

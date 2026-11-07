@@ -29,3 +29,6 @@ html,body{height:100%;background:#000;color:#f3e2c4;font-family:Georgia,"Times N
 @media(orientation:landscape) and (max-height:600px){.hub,#start,#end{gap:12px;justify-content:safe center}.hub .big,#end .big{font-size:32px}.levels,.menuTools{flex-direction:row;justify-content:center;width:min(100%,960px);gap:12px}.levels>.btn,.menuTools>*{flex:1;min-width:0}.menuTools .btn{font-size:18px;padding:10px}.installHint{width:240px}#end{flex-flow:row wrap;align-content:center}#end .big,#end .mid{width:100%;text-align:center}}
 
 .install:has(.installHint:not([hidden])){margin-bottom:28px}
+#quote{position:absolute;left:50%;transform:translateX(-50%);top:calc(max(10px,env(safe-area-inset-top)) + 40px);width:min(92%,560px);text-align:center;pointer-events:none;text-shadow:0 1px 3px #000,0 0 6px #000,0 0 2px #000;line-height:1.25}
+#quote blockquote{font-style:italic;font-size:clamp(12px,2.8vw,16px);color:#f3e2c4}
+#quote figcaption{margin-top:2px;font-size:clamp(11px,2.4vw,14px);color:#c79a54;letter-spacing:.03em}

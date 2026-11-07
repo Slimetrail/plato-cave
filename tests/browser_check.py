@@ -3,7 +3,7 @@ import asyncio,sys,os,json
 from pathlib import Path
 from playwright.async_api import async_playwright
 U=os.environ.get('PLATO_URL','http://127.0.0.1:19543/')
-OUT=Path('/workspace/plato-cave/game-export/t2060u-medium-hard/browser-build7');OUT.mkdir(parents=True,exist_ok=True)
+OUT=Path('/workspace/plato-cave/game-export/t2067u-quotes/browser-build8');OUT.mkdir(parents=True,exist_ok=True)
 async def main():
   res=[]
   def ok(n,c):res.append((n,bool(c)));print('PASS' if c else 'FAIL',n,flush=True)
@@ -136,8 +136,25 @@ async def main():
       await pg.set_viewport_size({'width':w,'height':h});await pg.evaluate('show("menu")')
       fits=await pg.evaluate("[...document.querySelectorAll('#menu button')].filter(e=>e.offsetParent).every(e=>{const r=e.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth})")
       ok(f'menu buttons fit {w}x{h}',fits);ok(f'install hint does not overlap update {w}x{h}',await pg.evaluate('document.getElementById("menuInstallHint").getBoundingClientRect().bottom<=document.getElementById("updateBtn").getBoundingClientRect().top') if h>w else True);await pg.screenshot(path=str(OUT/f'menu-{w}x{h}.png'))
+    # t2067u: small Plato saying during play rounds (guess + reveal), hidden elsewhere, never over the guess bar.
+    qv='(()=>{const q=document.getElementById("quote"),r=q.getBoundingClientRect();return {vis:!!q.offsetParent&&!q.hidden&&r.height>0,text:document.getElementById("quoteText").textContent,by:document.getElementById("quoteBy").textContent}})()'
+    ovl='(()=>{const a=document.getElementById("quote").getBoundingClientRect(),hit=id=>{const b=document.getElementById(id).getBoundingClientRect();return a.left<b.right&&b.left<a.right&&a.top<b.bottom&&b.top<a.bottom};return {guess:hit("guess"),bar:hit("bar"),msg:hit("msg"),hud:hit("hud")}})()'
+    await pg.set_viewport_size({'width':390,'height':844});await pg.evaluate('show("menu")')
+    ok('quote hidden on level menu',not (await pg.evaluate(qv))['vis'])
+    await pg.click('#easyBtn');await pg.wait_for_timeout(300);q0=await pg.evaluate(qv)
+    ok('Easy guess round shows Plato saying',q0['vis'] and len(q0['text'])>20);ok('attribution names Plato','Plato' in q0['by'])
+    o=await pg.evaluate(ovl);ok('quote does not overlap #guess/#bar/#msg/#hud at 390x844',not any(o.values()));print('QUOTE',q0,o,flush=True)
+    await pg.screenshot(path=str(OUT/'quote-390x844-guess.png'))
+    await pg.evaluate('__plato.submit("x")');await pg.wait_for_timeout(700);qr=await pg.evaluate(qv)
+    ok('quote stays during object reveal (same saying)',qr['vis'] and qr['text']==q0['text']);await pg.screenshot(path=str(OUT/'quote-390x844-reveal.png'))
+    await pg.evaluate('__plato.next()');await pg.wait_for_timeout(200);q1=await pg.evaluate(qv);ok('later round shows a different saying',q1['vis'] and q1['text']!=q0['text'])
+    await pg.evaluate('endGame()');ok('quote hidden at The End',not (await pg.evaluate(qv))['vis'])
+    for lv in ['medium','hard']:
+      await pg.evaluate('show("menu")');await pg.click('#'+lv+'Btn');await pg.wait_for_timeout(200);qq=await pg.evaluate(qv);ok(lv+' round shows Plato saying',qq['vis'] and 'Plato' in qq['by'])
+    await pg.set_viewport_size({'width':1280,'height':800});await pg.wait_for_timeout(200);await pg.screenshot(path=str(OUT/'quote-1280x800-guess.png'))
+    await pg.evaluate('endGame();show("start")');ok('quote hidden on Start',not (await pg.evaluate(qv))['vis'])
     await pg.set_viewport_size({'width':1280,'height':800})
-    keys=await pg.evaluate('caches.keys()');ok('build 7 cache installed', 'platocave-v7' in keys)
+    keys=await pg.evaluate('caches.keys()');ok('build 8 cache installed', 'platocave-v8' in keys)
     await c.set_offline(True);await pg.reload();await pg.wait_for_timeout(500);ok('works offline after first load',await pg.is_visible('#startBtn'))
     rr=await pg.evaluate('''async()=>{const r=await fetch('assets/intro.mp4',{headers:{range:'bytes=-4096'}});return {s:r.status,cr:r.headers.get('content-range'),size:(await r.arrayBuffer()).byteLength}}''')
     ok('offline seek byte range served from cached video',rr['s']==206 and rr['size']==4096 and rr['cr'].startswith('bytes '))
@@ -150,21 +167,21 @@ async def main():
     upgrade_ctx=await b.new_context();old=await upgrade_ctx.new_page();await old.goto(U)
     await old.evaluate('navigator.serviceWorker.ready');await old.reload();await old.wait_for_function('!!navigator.serviceWorker.controller')
     await old.evaluate('''async()=>{
-      const src=await caches.open('platocave-v7'),dst=await caches.open('platocave-v2');
+      const src=await caches.open('platocave-v8'),dst=await caches.open('platocave-v2');
       for(const req of await src.keys()){if(req.url.endsWith('__build_manifest__'))continue;
         const url=req.url.replace(/([?]v=)[0-9]+$/,(_,a)=>a+'2');await dst.put(url,await src.match(req))}
       const meta=await caches.open('platocave-vmeta');await meta.put('meta',new Response(JSON.stringify({current:'2'})));
       await navigator.serviceWorker.register('sw.js?r3-upgrade',{scope:'./'});
     }''')
-    await old.wait_for_function('''async()=>{const c=await caches.open('platocave-vmeta'),r=await c.match('meta'),m=await r.json();return m.current==='2'&&m.pending==='7'&&Object.values(m.pins||{}).includes('2')}''')
+    await old.wait_for_function('''async()=>{const c=await caches.open('platocave-vmeta'),r=await c.match('meta'),m=await r.json();return m.current==='2'&&m.pending==='8'&&Object.values(m.pins||{}).includes('2')}''')
     await old.wait_for_function('navigator.serviceWorker.controller.scriptURL.includes("r3-upgrade")')
     migration=await old.evaluate('''async()=>{const m=await (await (await caches.open('platocave-vmeta')).match('meta')).json();return {m,keys:await caches.keys()}}''')
-    ok('actual install pins unpinned legacy tab before claim; build 7 pending',migration['m']['current']=='2' and migration['m']['pending']=='7' and 'platocave-v2' in migration['keys'])
+    ok('actual install pins unpinned legacy tab before claim; build 8 pending',migration['m']['current']=='2' and migration['m']['pending']=='8' and 'platocave-v2' in migration['keys'])
     text=await old.evaluate('fetch("game.js?v=2").then(r=>r.text())')
     ok('legacy client still reads its v2 script key', 'const TITLE_TIME=23.0' in text)
     new=await upgrade_ctx.new_page();await new.goto(U);await new.wait_for_function('!!navigator.serviceWorker.controller')
     migration=await new.evaluate('''async()=>({m:await (await (await caches.open('platocave-vmeta')).match('meta')).json(),keys:await caches.keys()})''')
-    ok('actual next launch promotes 7 but retains old live cache',migration['m']['current']=='7' and 'platocave-v2' in migration['keys'] and '2' in migration['m']['pins'].values())
+    ok('actual next launch promotes 8 but retains old live cache',migration['m']['current']=='8' and 'platocave-v2' in migration['keys'] and '2' in migration['m']['pins'].values())
     await old.close();await new.reload()
     await new.wait_for_function('caches.keys().then(k=>!k.includes("platocave-v2"))')
     ok('actual cleanup reclaims legacy cache only after window closes',True)

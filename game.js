@@ -103,12 +103,15 @@ function resize(){DPR=Math.min(2,window.devicePixelRatio||1);const vv=window.vis
  $("bar").style.top=(y+H-$("bar").offsetHeight)+"px";
  Object.assign($("msg").style,{left:x+"px",top:(y+H-$("bar").offsetHeight-56)+"px",bottom:"auto",width:W+"px"});
  Object.assign($("hud").style,{left:(x+14)+"px",top:(y+10)+"px",width:Math.max(0,W-28)+"px",right:"auto"});
+ const q=$("quote");if(q)Object.assign(q.style,{left:(x+W/2)+"px",top:(y+10+$("hud").offsetHeight+6)+"px",maxHeight:Math.max(0,Math.round(H*0.2))+"px",overflow:"hidden"});
  cv.width=Math.round(W*DPR);cv.height=Math.round(H*DPR);sh.width=cv.width;sh.height=cv.height}
 addEventListener("resize",resize);if(window.visualViewport){visualViewport.addEventListener("resize",resize);visualViewport.addEventListener("scroll",resize)}resize();
 function startGame(level=activeLevel){activeLevel=Object.hasOwn(S.LEVELS,level)?level:"easy";activeShapes=S.LEVELS[activeLevel];round=0;score=0;if(!activeShapes.length){endGame();return}show("game");resize();newRound()}
 function endGame(){phase="end";$("endScore").textContent="Score "+score+"  ("+(score/100)+" of "+activeShapes.length+" right)";show("end")}
 function newRound(){phase="guess";t0=performance.now();$("guess").value="";$("guess").disabled=false;$("goBtn").style.display="";$("nextBtn").style.display="none";$("msg").textContent="What makes this shadow?";
- $("roundTxt").textContent=(round+1)+" / "+activeShapes.length;$("scoreTxt").textContent="Score "+score}
+ $("roundTxt").textContent=(round+1)+" / "+activeShapes.length;$("scoreTxt").textContent="Score "+score;showQuote()}
+// t2067u: one genuine Plato saying per round (rotates by round index), visible during guess and reveal; hidden off the game screen with #game.
+function showQuote(){const Q=self.PlatoQuotes,q=$("quote");if(!Q||!q)return;const s=Q.pickForRound(round);$("quoteText").textContent=s.text;$("quoteBy").textContent="\u2014 "+s.by;q.hidden=false}
 function flicker(t){return Math.sin(t*0.0071)*0.5+Math.sin(t*0.0173+1)*0.3+Math.sin(t*0.031+2)*0.2}
 function poseOf(shape,t){return S.displayPose(shape,t)}
 function light(t){const f=flicker(t);return [0.15+f*0.12,-0.35+f*0.05,5.2]}
