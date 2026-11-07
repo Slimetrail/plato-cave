@@ -1,6 +1,11 @@
 "use strict";
 const S=PlatoShapes,$=id=>document.getElementById(id);
-const screens=["start","intro","game","end"];function show(n){for(const s of screens)$(s).classList.toggle("on",s===n)}
+let currentScreen="start",pendingReady=false,activeLevel="easy",activeShapes=S.SHAPES;
+const screens=["start","intro","menu","settings","game","end"];
+function updateCorner(){$("updateReadyBtn").hidden=!(pendingReady&&["start","menu","end"].includes(currentScreen))}
+function show(n){currentScreen=n;for(const s of screens)$(s).classList.toggle("on",s===n);updateCorner()}
+function savedVolume(key){try{const v=localStorage.getItem(key);if(v!==null&&v.trim()!==""&&Number.isFinite(Number(v)))return Math.max(0,Math.min(100,Number(v)))/100}catch(_){}return 1}
+let musicVolume=savedVolume("platocave-music-vol"),soundsVolume=savedVolume("platocave-sfx-vol"),fadeTimer=0;
 const video=$("introVideo"),music=$("introMusic");
 // Title is fully readable at 23.0s (decoded frames inspected at 18..25s).
 const TITLE_TIME=23.0;
@@ -9,7 +14,7 @@ function retryMusic(){if(!["playing","hold"].includes(introState))return;
  try{const p=music.play();if(p&&p.then)p.then(()=>{musicNeedsUnlock=false},()=>{musicNeedsUnlock=true})}catch(_){musicNeedsUnlock=true}}
 function markTitle(){if(video.currentTime>=TITLE_TIME&&video.readyState>=2){titleReady=true;$("tapHint").classList.add("on")}}
 function startIntro(){PlatoSfx.unlock();show("intro");introState="playing";titleReady=false;skipPending=false;skipWanted=false;clearTimeout(seekTimer);$("tapHint").classList.remove("on");$("skipBtn").style.display="";
- video.currentTime=0;music.currentTime=0;music.volume=1;music.loop=true;
+ clearInterval(fadeTimer);video.currentTime=0;music.currentTime=0;music.volume=musicVolume;music.loop=true;
  const pv=video.play();if(pv&&pv.catch)pv.catch(()=>{/* Never freeze an undecoded/zero-time frame. A later gesture retries. */});retryMusic()}
 function toHold(){if(introState!=="playing"||video.currentTime<TITLE_TIME||video.readyState<2)return;
  markTitle();introState="hold";skipPending=false;skipWanted=false;clearTimeout(seekTimer);video.pause();$("skipBtn").style.display="none"}
@@ -40,8 +45,8 @@ $("skipBtn").addEventListener("click",e=>{e.stopPropagation();retryMusic();trySk
 $("intro").addEventListener("click",()=>{retryMusic();if(titleReady||introState==="hold")endIntro();else if(video.paused)video.play().catch(()=>{})});
 // Retry a rejected unlock on every later intro gesture, including a title/Skip tap.
 $("intro").addEventListener("pointerdown",retryMusic);
-function fadeMusic(){const v0=music.volume;let k=0;const id=setInterval(()=>{k++;music.volume=Math.max(0,v0*(1-k/20));if(k>=20){clearInterval(id);music.pause();music.volume=1}},50)}
-function endIntro(){introState="done";skipPending=false;clearTimeout(seekTimer);video.pause();fadeMusic();startGame()}
+function fadeMusic(){clearInterval(fadeTimer);const v0=musicVolume;let k=0;fadeTimer=setInterval(()=>{k++;music.volume=Math.max(0,v0*(1-k/20));if(k>=20){clearInterval(fadeTimer);music.pause();music.volume=musicVolume}},50)}
+function endIntro(){introState="done";skipPending=false;clearTimeout(seekTimer);video.pause();fadeMusic();show("menu")}
 $("startBtn").addEventListener("click",startIntro);
 document.addEventListener("visibilitychange",()=>{if(document.hidden){music.pause();if(introState==="playing")video.pause()}else if(introState==="playing"||introState==="hold"){retryMusic();if(introState==="playing")video.play().catch(()=>{})}});
 
@@ -100,9 +105,10 @@ function resize(){DPR=Math.min(2,window.devicePixelRatio||1);const vv=window.vis
  Object.assign($("hud").style,{left:(x+14)+"px",top:(y+10)+"px",width:Math.max(0,W-28)+"px",right:"auto"});
  cv.width=Math.round(W*DPR);cv.height=Math.round(H*DPR);sh.width=cv.width;sh.height=cv.height}
 addEventListener("resize",resize);if(window.visualViewport){visualViewport.addEventListener("resize",resize);visualViewport.addEventListener("scroll",resize)}resize();
-function startGame(){round=0;score=0;show("game");resize();newRound()}
+function startGame(level=activeLevel){activeLevel=Object.hasOwn(S.LEVELS,level)?level:"easy";activeShapes=S.LEVELS[activeLevel];round=0;score=0;if(!activeShapes.length){endGame();return}show("game");resize();newRound()}
+function endGame(){phase="end";$("endScore").textContent="Score "+score+"  ("+(score/100)+" of "+activeShapes.length+" right)";show("end")}
 function newRound(){phase="guess";t0=performance.now();$("guess").value="";$("guess").disabled=false;$("goBtn").style.display="";$("nextBtn").style.display="none";$("msg").textContent="What makes this shadow?";
- $("roundTxt").textContent=(round+1)+" / "+S.SHAPES.length;$("scoreTxt").textContent="Score "+score}
+ $("roundTxt").textContent=(round+1)+" / "+activeShapes.length;$("scoreTxt").textContent="Score "+score}
 function flicker(t){return Math.sin(t*0.0071)*0.5+Math.sin(t*0.0173+1)*0.3+Math.sin(t*0.031+2)*0.2}
 function poseOf(shape,t){return S.displayPose(shape,t)}
 function light(t){const f=flicker(t);return [0.15+f*0.12,-0.35+f*0.05,5.2]}
@@ -209,17 +215,57 @@ function drawObject(shape,t,cx,cy,size){
  pg.beginPath();points.forEach((p,i)=>i?pg.lineTo(...p):pg.moveTo(...p));pg.strokeStyle="rgba(55,26,9,.42)";pg.lineWidth=1.3;pg.stroke()}}
  // A single blurred painted silhouette edge; no per-face ink.
  g.save();g.shadowColor="rgba(23,11,4,.9)";g.shadowBlur=3;g.shadowOffsetY=1.5;g.drawImage(paint,0,0,W,H);g.restore()}
-function frame(now){requestAnimationFrame(frame);if(!$("game").classList.contains("on"))return;const sp=S.SHAPES[round];if(!sp)return;g.setTransform(DPR,0,0,DPR,0,0);drawWall(now);drawShadow(sp,now);
+function frame(now){requestAnimationFrame(frame);if(!$("game").classList.contains("on"))return;const sp=activeShapes[round];if(!sp)return;g.setTransform(DPR,0,0,DPR,0,0);drawWall(now);drawShadow(sp,now);
  if(phase==="reveal"){const a=Math.min(1,(now-revealAt)/500);g.save();g.globalAlpha=a*0.20;g.fillStyle="#000";g.fillRect(0,0,W,H);g.restore();g.save();g.globalAlpha=a;drawObject(sp,now,W/2,(H-150)/2+20,radius(Math.min(W,H-150)*0.27));g.restore()}}
 requestAnimationFrame(frame);
 function submit(){if(phase!=="guess")return;const text=$("guess").value;if(!S.norm(text)){$("msg").textContent="Type a word first.";$("guess").focus();return}
- const sp=S.SHAPES[round],ok=S.isCorrect(sp,text);lastResult=ok;phase="reveal";revealAt=performance.now();$("guess").disabled=true;$("guess").blur();
+ const sp=activeShapes[round],ok=S.isCorrect(sp,text);lastResult=ok;phase="reveal";revealAt=performance.now();$("guess").disabled=true;$("guess").blur();
  if(ok){score+=100;$("msg").textContent="Yes! "+S.article(sp.name).replace(/^./,c=>c.toUpperCase())+" "+sp.name+". +100"}else{PlatoSfx.wrong();$("msg").textContent="No! It was "+S.article(sp.name)+" "+sp.name+"."}
  $("scoreTxt").textContent="Score "+score;$("goBtn").style.display="none";$("nextBtn").style.display="block"}
-function next(){if(phase!=="reveal")return;round++;if(round>=S.SHAPES.length){phase="end";$("endScore").textContent="Score "+score+"  ("+(score/100)+" of "+S.SHAPES.length+" right)";show("end")}else newRound()}
+function next(){if(phase!=="reveal")return;round++;if(round>=activeShapes.length){endGame()}else newRound()}
 $("bar").addEventListener("submit",e=>{e.preventDefault();if(phase==="guess")submit();else next()});
 $("nextBtn").addEventListener("click",next);
-$("againBtn").addEventListener("click",startGame);$("rewatchBtn").addEventListener("click",startIntro);
+$("againBtn").addEventListener("click",()=>startGame(activeLevel));$("rewatchBtn").addEventListener("click",startIntro);
 // testing hook (no answers exposed beyond the shape list already in shapes.js)
-self.__plato={get state(){return {introState,titleReady,musicNeedsUnlock,skipPending,round,score,phase,lastResult}},submit:t=>{$("guess").value=t;submit()},next};
-if("serviceWorker" in navigator&&location.protocol!=="file:"){navigator.serviceWorker.register("sw.js").then(()=>navigator.serviceWorker.ready).then(r=>{if(navigator.onLine&&r.active)r.active.postMessage("check")}).catch(()=>{})}
+self.__plato={get state(){return {introState,titleReady,musicNeedsUnlock,skipPending,skipWanted,round,score,phase,lastResult,activeLevel,total:activeShapes.length,currentScreen,musicVolume,soundsVolume,pendingReady}},submit:t=>{$("guess").value=t;submit()},next};
+// Menu and settings sit outside the existing guessing loop.
+for(const level of ["easy","medium","hard"])$(level+"Btn").addEventListener("click",()=>startGame(level));
+$("menuBtn").addEventListener("click",()=>show("menu"));
+let settingsFrom="menu";
+function openSettings(){if(!["menu","end"].includes(currentScreen))return;settingsFrom=currentScreen;show("settings")}
+$("settingsBtn").addEventListener("click",openSettings);$("endSettingsBtn").addEventListener("click",openSettings);
+$("settingsDoneBtn").addEventListener("click",()=>show(settingsFrom));
+function applyVolumes(){music.volume=musicVolume;PlatoSfx.setVolume(soundsVolume);
+ $("musicVol").value=Math.round(musicVolume*100);$("soundsVol").value=Math.round(soundsVolume*100);
+ $("musicPercent").textContent=Math.round(musicVolume*100)+"%";$("soundsPercent").textContent=Math.round(soundsVolume*100)+"%"}
+for(const [id,key] of [["musicVol","platocave-music-vol"],["soundsVol","platocave-sfx-vol"]])$(id).addEventListener("input",()=>{
+ const value=Number($(id).value);if(id==="musicVol")musicVolume=value/100;else soundsVolume=value/100;
+ try{localStorage.setItem(key,String(value))}catch(_){}applyVolumes()});applyVolumes();
+let installPrompt=null,installed=false;
+const displayModes=matchMedia("(display-mode: standalone), (display-mode: fullscreen)");
+function updateInstall(){const hide=installed||displayModes.matches||navigator.standalone===true;
+ for(const id of ["startInstall","menuInstall"])$(id).hidden=hide}
+addEventListener("beforeinstallprompt",e=>{e.preventDefault();installPrompt=e});
+addEventListener("appinstalled",()=>{installed=true;installPrompt=null;updateInstall()});
+if(displayModes.addEventListener)displayModes.addEventListener("change",updateInstall);
+async function installApp(hint){if(!["start","menu"].includes(currentScreen))return;
+ if(installPrompt){const prompt=installPrompt;installPrompt=null;try{await prompt.prompt();await prompt.userChoice}catch(_){} }
+ else $(hint).hidden=false}
+$("startInstallBtn").addEventListener("click",()=>installApp("startInstallHint"));
+$("menuInstallBtn").addEventListener("click",()=>installApp("menuInstallHint"));updateInstall();
+let swRegistration=null,updateTimer=0,updateTimeout=0;
+function updateStatus(status){clearTimeout(updateTimer);
+ if(status==="pending-ready")pendingReady=true;
+ const labels={checking:"Checking…",current:"You’re up to date","pending-ready":"Update ready — tap to reload",failed:"Try again when you’re online"};
+ $("updateBtn").textContent=pendingReady?labels["pending-ready"]:(labels[status]||"Check for update");updateCorner();
+ if(status!=="checking")clearTimeout(updateTimeout);
+ if(status==="current"&&!pendingReady)updateTimer=setTimeout(()=>{$("updateBtn").textContent="Check for update"},2000)}
+function reloadUpdate(){if(pendingReady&&["start","menu","end"].includes(currentScreen))location.reload()}
+$("updateReadyBtn").addEventListener("click",reloadUpdate);
+$("updateBtn").addEventListener("click",()=>{if(currentScreen!=="menu")return;if(pendingReady){reloadUpdate();return}
+ const worker=navigator.serviceWorker&&(navigator.serviceWorker.controller||(swRegistration&&swRegistration.active));
+ if(!navigator.onLine||!worker){updateStatus("failed");return}updateStatus("checking");worker.postMessage("check");
+ clearTimeout(updateTimeout);updateTimeout=setTimeout(()=>updateStatus("failed"),45000)});
+if("serviceWorker" in navigator&&location.protocol!=="file:"){
+ navigator.serviceWorker.addEventListener("message",e=>{if(e.data&&e.data.type==="plato-update")updateStatus(e.data.status)});
+ navigator.serviceWorker.register("sw.js").then(()=>navigator.serviceWorker.ready).then(r=>{swRegistration=r;if(navigator.onLine&&r.active)r.active.postMessage("check")}).catch(()=>{})}

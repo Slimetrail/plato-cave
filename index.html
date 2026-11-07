@@ -5,18 +5,29 @@
 <meta name="theme-color" content="#1a0e05"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icons/icon-192.png"><link rel="apple-touch-icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="style.css?v=2">
+<link rel="stylesheet" href="style.css?v=3">
 </head><body>
-<div id="start" class="screen on"><div class="big">Plato's Cave</div><button id="startBtn" class="btn">Tap to start</button></div>
+<div id="start" class="screen on"><div class="big">Plato's Cave</div><button id="startBtn" class="btn">Tap to start</button>
+ <div id="startInstall" class="install"><button id="startInstallBtn" class="btn dim">Install app</button><p id="startInstallHint" class="installHint" hidden>Tap ⋮ in Chrome, then Add to Home screen / Install app.</p></div></div>
 <div id="intro" class="screen"><video id="introVideo" src="assets/intro.mp4" playsinline webkit-playsinline muted preload="auto"></video>
  <button id="skipBtn" class="skip">Skip</button><div id="tapHint" class="tapHint">Tap to play</div></div>
 <audio id="introMusic" src="assets/intro-music.mp3" preload="auto" loop></audio>
+<div id="menu" class="screen hub"><div class="big">Pick a level</div>
+ <div class="levels"><button id="easyBtn" class="btn">Easy</button><button id="mediumBtn" class="btn">Medium</button><button id="hardBtn" class="btn">Hard</button></div>
+ <div class="menuTools"><button id="settingsBtn" class="btn dim">Settings</button>
+ <div id="menuInstall" class="install"><button id="menuInstallBtn" class="btn dim">Install app</button><p id="menuInstallHint" class="installHint" hidden>Tap ⋮ in Chrome, then Add to Home screen / Install app.</p></div>
+ <button id="updateBtn" class="btn dim">Check for update</button></div></div>
+<div id="settings" class="screen hub"><div class="big">Settings</div>
+ <label class="volume" for="musicVol">Music <span id="musicPercent">100%</span><input id="musicVol" type="range" min="0" max="100" step="5" value="100"></label>
+ <label class="volume" for="soundsVol">Sounds <span id="soundsPercent">100%</span><input id="soundsVol" type="range" min="0" max="100" step="5" value="100"></label>
+ <button id="settingsDoneBtn" class="btn">Done</button></div>
 <div id="game" class="screen"><canvas id="cv"></canvas>
  <div id="hud"><span id="roundTxt">1 / 50</span><span id="scoreTxt">Score 0</span></div>
  <div id="msg"></div>
  <form id="bar" autocomplete="off"><input id="guess" type="text" maxlength="30" placeholder="What is it?" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" aria-label="Your guess"><button id="goBtn" class="btn" type="submit">Go</button><button id="nextBtn" class="btn" type="button">Next</button></form>
 </div>
 <div id="end" class="screen"><div class="big">The End</div><div id="endScore" class="mid"></div>
- <button id="againBtn" class="btn">Play again</button><button id="rewatchBtn" class="btn dim">Watch intro</button></div>
-<script src="shapes.js?v=4"></script><script src="sfx.js?v=1"></script><script src="game.js?v=5"></script>
+ <button id="againBtn" class="btn">Play again</button><button id="rewatchBtn" class="btn dim">Watch intro</button><button id="menuBtn" class="btn dim">Menu</button><button id="endSettingsBtn" class="btn dim">Settings</button></div>
+<button id="updateReadyBtn" class="btn dim updateCorner" hidden>Update ready — tap to reload</button>
+<script src="shapes.js?v=5"></script><script src="sfx.js?v=2"></script><script src="game.js?v=6"></script>
 </body></html>

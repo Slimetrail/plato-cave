@@ -3,7 +3,7 @@ import asyncio,sys,os,json
 from pathlib import Path
 from playwright.async_api import async_playwright
 U=os.environ.get('PLATO_URL','http://127.0.0.1:19543/')
-OUT=Path('/workspace/plato-cave/game-export/leftover-skip-fix');OUT.mkdir(parents=True,exist_ok=True)
+OUT=Path('/workspace/plato-cave/game-export/t2060u-menu-settings');OUT.mkdir(parents=True,exist_ok=True)
 async def main():
   res=[]
   def ok(n,c):res.append((n,bool(c)));print('PASS' if c else 'FAIL',n,flush=True)
@@ -36,7 +36,7 @@ async def main():
     await pg.screenshot(path=str(OUT/'cached-reload-skip-title-hold.png'))
     if st['s']=='hold':
       ok('real decoded Skip title hold, music continues',st['t']>=23 and st['m'] and st['loop'] and st['vp'] and st['title'])
-      await pg.mouse.click(600,400);ok('real title tap starts game',await pg.is_visible('#game'))
+      await pg.mouse.click(600,400);ok('real title tap opens level menu',await pg.is_visible('#menu'));await pg.click('#easyBtn')
     else:
       print('NOTE: local browser could not seek title; real-video hold not visually proven. Kept playing rather than freezing black.',flush=True)
       ok('failed real seek does not freeze black/zero frame',not st['vp'])
@@ -81,12 +81,12 @@ async def main():
     await pg.click('#skipBtn');ok('Skip waits for seeked instead of immediate hold',await pg.evaluate('__plato.state.introState==="playing"&&__plato.state.skipPending&&!video.paused'))
     await pg.evaluate('video.dispatchEvent(new Event("seeked"))');await pg.wait_for_timeout(100)
     ok('seeked + decoded title enters hold and keeps music looping',await pg.evaluate('__plato.state.introState==="hold"&&video.paused&&!music.paused&&music.loop&&__plato.state.titleReady'))
-    await pg.mouse.click(600,400);ok('hold tap starts game',await pg.is_visible('#game'))
+    await pg.mouse.click(600,400);ok('hold tap opens level menu',await pg.is_visible('#menu'))
     # Finish fade before restarting so the prior fade cannot interfere with next music test.
     await pg.wait_for_timeout(1100)
     await pg.evaluate('startIntro();mockVideo.time=23.05;video.dispatchEvent(new Event("timeupdate"))')
     ok('readable title is tappable before ended',await pg.evaluate('__plato.state.introState==="playing"&&__plato.state.titleReady&&document.getElementById("tapHint").classList.contains("on")'))
-    await pg.mouse.click(600,400);ok('tap during title playback starts game',await pg.is_visible('#game'));await pg.wait_for_timeout(1100)
+    await pg.mouse.click(600,400);ok('tap during title playback opens level menu',await pg.is_visible('#menu'));await pg.wait_for_timeout(1100)
     await pg.evaluate('startIntro();document.getElementById("skipBtn").click();mockVideo.time=0;mockVideo.ready=0;video.dispatchEvent(new Event("seeked"))')
     ok('failed zero-time seek keeps playing, no title hint or black hold',await pg.evaluate('__plato.state.introState==="playing"&&!__plato.state.titleReady&&!video.paused&&!__plato.state.skipPending'))
     await pg.evaluate('mockVideo.time=25.36;mockVideo.ready=4;video.dispatchEvent(new Event("ended"))')
@@ -110,7 +110,34 @@ async def main():
     await pg.evaluate('mockVideo.end=24.0;startIntro();mockVideo.time=3;document.getElementById("skipBtn").click()')
     ok('mock range end 24.0 (< dur-0.25) still seeks',await pg.evaluate('__plato.state.skipPending&&Math.abs(mockVideo.time-25.24)<0.01'))
     await pg.evaluate('delete mockVideo.end')
-    keys=await pg.evaluate('caches.keys()');ok('build 5 cache installed', 'platocave-v5' in keys)
+    # New UI behavior on real pages; all networking remains on the local test server.
+    await pg.reload();await pg.evaluate('show("menu")')
+    ok('menu exposes three levels',all([await pg.is_visible('#'+k+'Btn') for k in ['easy','medium','hard']]))
+    await pg.click('#mediumBtn');ok('empty Medium safely ends 0 of 0',await pg.is_visible('#end') and '0 of 0' in await pg.inner_text('#endScore'))
+    await pg.click('#againBtn');ok('Play again keeps Medium',await pg.evaluate('__plato.state.activeLevel==="medium"&&__plato.state.total===0'))
+    await pg.click('#menuBtn');await pg.click('#hardBtn');ok('empty Hard safely ends',await pg.evaluate('__plato.state.activeLevel==="hard"&&__plato.state.phase==="end"'))
+    await pg.click('#endSettingsBtn');await pg.eval_on_selector('#musicVol',"e=>{e.value=35;e.dispatchEvent(new Event('input'))}")
+    await pg.eval_on_selector('#soundsVol',"e=>{e.value=0;e.dispatchEvent(new Event('input'))}")
+    await pg.click('#settingsDoneBtn');ok('settings Done returns to End',await pg.is_visible('#end'))
+    await pg.reload();ok('saved 35% music and muted Sounds restored',await pg.evaluate('__plato.state.musicVolume===.35&&__plato.state.soundsVolume===0&&music.volume===.35'))
+    await pg.evaluate('show("menu")');await pg.click('#settingsBtn');await pg.click('#settingsDoneBtn');ok('settings Done returns to Menu',await pg.is_visible('#menu'))
+    await pg.evaluate('fadeMusic()');await pg.wait_for_timeout(1100);ok('fade restores saved volume',await pg.evaluate('music.volume===.35&&music.paused'))
+    await pg.evaluate('installPrompt=null');await pg.click('#menuInstallBtn');ok('install fallback hint visible',await pg.is_visible('#menuInstallHint'))
+    await pg.evaluate('window.__prompted=0;installPrompt={prompt:async()=>{window.__prompted++},userChoice:Promise.resolve({outcome:"dismissed"})}')
+    await pg.click('#menuInstallBtn');ok('Chrome install prompt invoked on tap',await pg.evaluate('window.__prompted===1'))
+    await pg.evaluate('dispatchEvent(new Event("appinstalled"))');ok('install buttons hide after install',not await pg.is_visible('#menuInstallBtn'))
+    await pg.evaluate('updateStatus("pending-ready")');ok('ready corner shown in menu',await pg.is_visible('#updateReadyBtn'))
+    await pg.click('#easyBtn');ok('ready corner hidden during play',not await pg.is_visible('#updateReadyBtn'))
+    ok('no settings/install/update controls in guessing HUD',not await pg.is_visible('#settingsBtn') and not await pg.is_visible('#updateBtn') and not await pg.is_visible('#menuInstallBtn'))
+    await pg.evaluate('endGame()');ok('ready corner shown at End',await pg.is_visible('#updateReadyBtn'))
+    await pg.evaluate('pendingReady=false;updateCorner();show("menu");installed=false;updateInstall()')
+    await c.set_offline(True);await pg.click('#updateBtn');ok('offline manual update fails safely','online' in await pg.inner_text('#updateBtn'));await c.set_offline(False)
+    for w,h in [(390,844),(360,640),(844,390)]:
+      await pg.set_viewport_size({'width':w,'height':h});await pg.evaluate('show("menu")')
+      fits=await pg.evaluate("[...document.querySelectorAll('#menu button')].filter(e=>e.offsetParent).every(e=>{const r=e.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth})")
+      ok(f'menu buttons fit {w}x{h}',fits);ok(f'install hint does not overlap update {w}x{h}',await pg.evaluate('document.getElementById("menuInstallHint").getBoundingClientRect().bottom<=document.getElementById("updateBtn").getBoundingClientRect().top') if h>w else True);await pg.screenshot(path=str(OUT/f'menu-{w}x{h}.png'))
+    await pg.set_viewport_size({'width':1280,'height':800})
+    keys=await pg.evaluate('caches.keys()');ok('build 6 cache installed', 'platocave-v6' in keys)
     await c.set_offline(True);await pg.reload();await pg.wait_for_timeout(500);ok('works offline after first load',await pg.is_visible('#startBtn'))
     rr=await pg.evaluate('''async()=>{const r=await fetch('assets/intro.mp4',{headers:{range:'bytes=-4096'}});return {s:r.status,cr:r.headers.get('content-range'),size:(await r.arrayBuffer()).byteLength}}''')
     ok('offline seek byte range served from cached video',rr['s']==206 and rr['size']==4096 and rr['cr'].startswith('bytes '))
@@ -123,21 +150,21 @@ async def main():
     upgrade_ctx=await b.new_context();old=await upgrade_ctx.new_page();await old.goto(U)
     await old.evaluate('navigator.serviceWorker.ready');await old.reload();await old.wait_for_function('!!navigator.serviceWorker.controller')
     await old.evaluate('''async()=>{
-      const src=await caches.open('platocave-v5'),dst=await caches.open('platocave-v2');
+      const src=await caches.open('platocave-v6'),dst=await caches.open('platocave-v2');
       for(const req of await src.keys()){if(req.url.endsWith('__build_manifest__'))continue;
-        const url=req.url.replace(/([?]v=)[45]$/,(_,a)=>a+'2');await dst.put(url,await src.match(req))}
+        const url=req.url.replace(/([?]v=)[0-9]+$/,(_,a)=>a+'2');await dst.put(url,await src.match(req))}
       const meta=await caches.open('platocave-vmeta');await meta.put('meta',new Response(JSON.stringify({current:'2'})));
       await navigator.serviceWorker.register('sw.js?r3-upgrade',{scope:'./'});
     }''')
-    await old.wait_for_function('''async()=>{const c=await caches.open('platocave-vmeta'),r=await c.match('meta'),m=await r.json();return m.current==='2'&&m.pending==='5'&&Object.values(m.pins||{}).includes('2')}''')
+    await old.wait_for_function('''async()=>{const c=await caches.open('platocave-vmeta'),r=await c.match('meta'),m=await r.json();return m.current==='2'&&m.pending==='6'&&Object.values(m.pins||{}).includes('2')}''')
     await old.wait_for_function('navigator.serviceWorker.controller.scriptURL.includes("r3-upgrade")')
     migration=await old.evaluate('''async()=>{const m=await (await (await caches.open('platocave-vmeta')).match('meta')).json();return {m,keys:await caches.keys()}}''')
-    ok('actual install pins unpinned legacy tab before claim; build 5 pending',migration['m']['current']=='2' and migration['m']['pending']=='5' and 'platocave-v2' in migration['keys'])
+    ok('actual install pins unpinned legacy tab before claim; build 6 pending',migration['m']['current']=='2' and migration['m']['pending']=='6' and 'platocave-v2' in migration['keys'])
     text=await old.evaluate('fetch("game.js?v=2").then(r=>r.text())')
     ok('legacy client still reads its v2 script key', 'const TITLE_TIME=23.0' in text)
     new=await upgrade_ctx.new_page();await new.goto(U);await new.wait_for_function('!!navigator.serviceWorker.controller')
     migration=await new.evaluate('''async()=>({m:await (await (await caches.open('platocave-vmeta')).match('meta')).json(),keys:await caches.keys()})''')
-    ok('actual next launch promotes 5 but retains old live cache',migration['m']['current']=='5' and 'platocave-v2' in migration['keys'] and '2' in migration['m']['pins'].values())
+    ok('actual next launch promotes 6 but retains old live cache',migration['m']['current']=='6' and 'platocave-v2' in migration['keys'] and '2' in migration['m']['pins'].values())
     await old.close();await new.reload()
     await new.wait_for_function('caches.keys().then(k=>!k.includes("platocave-v2"))')
     ok('actual cleanup reclaims legacy cache only after window closes',True)

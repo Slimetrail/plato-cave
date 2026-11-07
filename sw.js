@@ -5,7 +5,7 @@
 // build's cache. A new navigation may take a completed pending build; already-open clients keep their old cache,
 // which is deleted only after every client pinned to it has closed (checked with clients.matchAll).
 const PREFIX="platocave-v",META=PREFIX+"meta";
-const SHELL=["./","index.html","style.css?v=2","shapes.js?v=4","sfx.js?v=1","game.js?v=5","manifest.webmanifest","icons/icon-192.png","icons/icon-512.png","icons/maskable-512.png","assets/cave-wall.jpg","assets/intro.mp4","assets/intro-music.mp3"];
+const SHELL=["./","index.html","style.css?v=3","shapes.js?v=5","sfx.js?v=2","game.js?v=6","manifest.webmanifest","icons/icon-192.png","icons/icon-512.png","icons/maskable-512.png","assets/cave-wall.jpg","assets/intro.mp4","assets/intro-music.mp3"];
 const VERSION_URL="version.json";
 // Meta read-modify-writes are serialized so concurrent fetches cannot lose pins.
 let metaLock=Promise.resolve();function withMeta(fn){const p=metaLock.then(async()=>{const m=await getMeta();const r=await fn(m);await setMeta(m);return r});metaLock=p.catch(()=>{});return p}
@@ -52,9 +52,15 @@ async function ranged(res,rg){const b=await res.blob(),size=b.size,m=/^bytes=(\d
  let a,e;if(!m[1]){const n=Number(m[2]);if(!Number.isSafeInteger(n)||n<=0)return invalid();a=Math.max(0,size-n);e=size-1}
  else{a=Number(m[1]);e=m[2]?Number(m[2]):size-1;if(!Number.isSafeInteger(a)||!Number.isSafeInteger(e)||a>=size||e<a)return invalid();e=Math.min(e,size-1)}
  return new Response(b.slice(a,e+1),{status:206,headers:{"content-type":res.headers.get("content-type")||"application/octet-stream","content-range":"bytes "+a+"-"+e+"/"+size,"content-length":String(e-a+1),"accept-ranges":"bytes"}})}
+// Status messages are advisory only: they never navigate or promote a cache.
+async function notifyUpdate(status){for(const c of await liveClients())if(c.postMessage)c.postMessage({type:"plato-update",status})}
+async function notifyPending(){const m=await getMeta();if(m.current&&m.pending&&m.pending!==m.current&&await complete(m.pending)){await notifyUpdate("pending-ready");return true}return false}
 let checking=null;
-function checkUpdate(){if(checking)return checking;checking=(async()=>{try{const b=await remoteBuild(),m=await getMeta();
-  if(b===m.current||b===m.pending)return;await download(b);await withMeta(m2=>{m2.pending=b})}catch(e){/* silent: offline or broken update keeps the working build */try{await withMeta(m=>{m.lastErr=String(e).slice(0,120)})}catch(_){}}finally{checking=null}})();return checking}
+function checkUpdate(){if(checking)return checking;checking=(async()=>{try{await notifyUpdate("checking");
+  await notifyPending();const b=await remoteBuild(),m=await getMeta();
+  if(b===m.current||b===m.pending){if(!(await notifyPending()))await notifyUpdate("current");return}
+  await download(b);await withMeta(m2=>{m2.pending=b});await notifyPending()
+ }catch(e){/* silent: offline or broken update keeps the working build */try{await withMeta(m=>{m.lastErr=String(e).slice(0,120)});if(!(await notifyPending()))await notifyUpdate("failed")}catch(_){}}finally{checking=null}})();return checking}
 // Next launch: promote a COMPLETE pending build for this new navigation and future launches. Nothing is deleted here;
 // cleanup() keeps every build an open client is still pinned to.
 async function switchIfPending(m){if(m.pending&&m.pending!==m.current&&await complete(m.pending)){m.current=m.pending;delete m.pending}else if(m.pending&&!(await complete(m.pending)))delete m.pending;return m}
@@ -66,7 +72,7 @@ async function fromBuild(build,r){if(!build||!(await caches.has(PREFIX+build)))r
  let hit=await c.match(r.url)||await c.match(r.url,{ignoreSearch:true});if(!hit&&r.mode==="navigate")hit=await c.match("index.html");return hit||null}
 self.addEventListener("install",e=>{e.waitUntil((async()=>{await withMeta(pinOpen);
  try{const b=await remoteBuild(),m=await getMeta();if(b!==m.current&&b!==m.pending){await download(b);await withMeta(async m2=>{if(await complete(m2.current))m2.pending=b;else m2.current=b})}}
- catch(_){/* silent: keep working old cache on failed update */}await self.skipWaiting()})())});
+ catch(_){/* silent: keep working old cache on failed update */}await notifyPending();await self.skipWaiting()})())});
 self.addEventListener("activate",e=>{e.waitUntil((async()=>{await withMeta(async m=>{await pinOpen(m);if(m.current)await cleanup(m)});await self.clients.claim()})())});
 self.addEventListener("message",e=>{if(e.data==="check")e.waitUntil(checkUpdate())});
 self.addEventListener("fetch",e=>{const r=e.request,u=new URL(r.url);if(r.method!=="GET"||u.origin!==location.origin)return;

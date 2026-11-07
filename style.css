@@ -2,7 +2,7 @@
 html,body{height:100%;background:#000;color:#f3e2c4;font-family:Georgia,"Times New Roman",serif;overflow:hidden;touch-action:manipulation;-webkit-user-select:none;user-select:none}
 .screen{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:24px}
 .screen.on{display:flex}
-#start,#end{background:radial-gradient(ellipse at 55% 40%,#5a3510 0%,#1c0f05 55%,#000 100%)}
+#start,#end,#menu,#settings{background:radial-gradient(ellipse at 55% 40%,#5a3510 0%,#1c0f05 55%,#000 100%)}
 .big{font-size:clamp(34px,8vw,64px);text-shadow:0 2px 12px #000}.mid{font-size:clamp(24px,5vw,40px)}
 .btn{font:inherit;font-size:clamp(22px,4.5vw,30px);padding:14px 30px;border-radius:14px;border:2px solid #c79a54;background:#3a220c;color:#f8e8c8;cursor:pointer}
 .btn.dim{opacity:.8;font-size:clamp(18px,3.5vw,24px)}
@@ -17,3 +17,15 @@ html,body{height:100%;background:#000;color:#f3e2c4;font-family:Georgia,"Times N
 #bar{position:absolute;left:0;right:0;bottom:0;display:flex;gap:10px;padding:12px 12px max(12px,env(safe-area-inset-bottom));background:linear-gradient(transparent,rgba(0,0,0,.85) 40%)}
 #guess{flex:1;min-width:0;font:inherit;font-size:clamp(22px,5vw,30px);padding:12px 16px;border-radius:12px;border:2px solid #c79a54;background:#1d1107;color:#fff3dc;-webkit-user-select:text;user-select:text}
 #nextBtn{display:none}
+
+[hidden]{display:none!important}
+#start,#end,.hub{padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));overflow-y:auto}
+.levels,.menuTools{display:flex;flex-direction:column;gap:24px;width:min(100%,320px)}
+.levels .btn{width:100%;min-height:56px}.menuTools .btn{width:100%;min-height:48px}
+.install{position:relative;text-align:center}.installHint{position:absolute;top:100%;left:50%;transform:translateX(-50%);width:min(330px,85vw);font-size:14px;line-height:1.15;padding:3px;background:#1c0f05;z-index:2}
+.volume{width:min(100%,360px);font-size:26px}.volume span{float:right}.volume input{display:block;width:100%;height:48px;accent-color:#c79a54}
+.updateCorner{position:fixed;z-index:5;right:max(10px,env(safe-area-inset-right));top:max(10px,env(safe-area-inset-top));max-width:90vw;font-size:16px;padding:10px}
+@media(max-height:760px){#menu,#end{gap:12px}.levels,.menuTools{gap:12px}#menu .btn,#end .btn{padding:10px 18px;font-size:22px}}
+@media(orientation:landscape) and (max-height:600px){.hub,#start,#end{gap:12px;justify-content:safe center}.hub .big,#end .big{font-size:32px}.levels,.menuTools{flex-direction:row;justify-content:center;width:min(100%,960px);gap:12px}.levels>.btn,.menuTools>*{flex:1;min-width:0}.menuTools .btn{font-size:18px;padding:10px}.installHint{width:240px}#end{flex-flow:row wrap;align-content:center}#end .big,#end .mid{width:100%;text-align:center}}
+
+.install:has(.installHint:not([hidden])){margin-bottom:28px}

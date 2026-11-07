@@ -127,6 +127,7 @@ function castShadow(verts,faces,light){// project every vertex of the mesh along
 function article(name){return /^(?:[aeiou]|hour)/i.test(name)?"an":"a"}
 function displayPose(shape,t){let yaw=Math.sin(t*0.0006)*shape.sway+0.18,pitch=0.12+Math.sin(t*0.0004)*0.06;
  if(shape.name==="cone"){pitch=0.48;yaw=0.18}if(shape.name==="pyramid"){yaw=0.60;pitch=0.31}if(shape.name==="tower"){yaw=0.05+Math.sin(t*0.0006)*0.04;pitch=0.06}return pose(shape.mesh,yaw,pitch)}
-const API={article,displayPose,SHAPES:SHAPES,isCorrect:isCorrect,norm:norm,castShadow:castShadow,pose:pose,WALL_Z:WALL_Z,rotX:rotX,rotY:rotY};
+const LEVELS={easy:SHAPES,medium:[],hard:[]};
+const API={LEVELS,article,displayPose,SHAPES:SHAPES,isCorrect:isCorrect,norm:norm,castShadow:castShadow,pose:pose,WALL_Z:WALL_Z,rotX:rotX,rotY:rotY};
 if(typeof module!=="undefined"&&module.exports)module.exports=API;else root.PlatoShapes=API;
 })(typeof self!=="undefined"?self:this);

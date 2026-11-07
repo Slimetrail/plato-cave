@@ -27,11 +27,11 @@ const game=read("game.js");
 t("scoring: +100 on correct, no points + original SFX on wrong",()=>{ok(/if\(ok\)\{score\+=100/.test(game));ok(/else\{PlatoSfx\.wrong\(\)/.test(game));const sfx=read("sfx.js");ok(/createOscillator/.test(sfx)&&!/\.(mp3|wav|ogg)/.test(sfx),"sfx must be synthesized")});
 t("no ads / trackers / CDN",()=>{for(const f of ["index.html","game.js","shapes.js","sfx.js","sw.js","style.css","manifest.webmanifest"]){const s=read(f).toLowerCase();for(const bad of ["adsbygoogle","adsense","doubleclick","googletagmanager","google-analytics","gtag(","admob","applovin","unityads","facebook.net","cdn.","https://","http://"])ok(!s.includes(bad),f+" has "+bad)}});
 t("service worker caches every bundled asset and they exist",()=>{const sw=read("sw.js");const list=JSON.parse(sw.match(/const SHELL=(\[.*?\]);/)[1]);
- for(const a of ["assets/intro.mp4","assets/intro-music.mp3","assets/cave-wall.jpg","game.js?v=5","shapes.js?v=4","sfx.js?v=1","style.css?v=2","index.html"])ok(list.includes(a),a);
+ for(const a of ["assets/intro.mp4","assets/intro-music.mp3","assets/cave-wall.jpg","game.js?v=6","shapes.js?v=5","sfx.js?v=2","style.css?v=3","index.html"])ok(list.includes(a),a);
  for(const a of list)if(a!=="./")ok(fs.existsSync(path.join(R,a.split("?")[0])),"missing "+a);const html=read("index.html");for(const m of html.matchAll(/(?:src|href)="([^"]+)"/g))ok(list.includes(m[1])||m[1].startsWith("icons/")&&list.includes(m[1])||m[1]==="manifest.webmanifest","uncached "+m[1])});
 t("update path: version.json never cached, pending build, silent fail",()=>{const sw=read("sw.js");ok(/cache:"no-store"/.test(sw));ok(!/"version\.json"\s*[,\]]/.test(sw.match(/const SHELL=(\[.*?\]);/)[1]));ok(/pending/.test(sw)&&/silent/.test(sw));ok(JSON.parse(read("version.json")).build)});
 t("manifest standalone/fullscreen",()=>{const m=JSON.parse(read("manifest.webmanifest"));ok(m.display==="fullscreen"&&m.display_override.includes("standalone"))});
-t("title is tappable before ended, held only with decoded title",()=>{ok(/addEventListener\("ended",toHold\)/.test(game));ok(/if\(titleReady\|\|introState==="hold"\)endIntro\(\)/.test(game));ok(/video.currentTime<TITLE_TIME\|\|video.readyState<2/.test(game));ok(/requestVideoFrameCallback/.test(game)&&/addEventListener\("seeked"/.test(game));ok(/function endIntro\(\)\{[^}]*startGame\(\)/.test(game));ok(!(read("index.html")+game).toLowerCase().includes("not included"))});
+t("title is tappable before ended, held only with decoded title",()=>{ok(/addEventListener\("ended",toHold\)/.test(game));ok(/if\(titleReady\|\|introState==="hold"\)endIntro\(\)/.test(game));ok(/video.currentTime<TITLE_TIME\|\|video.readyState<2/.test(game));ok(/requestVideoFrameCallback/.test(game)&&/addEventListener\("seeked"/.test(game));ok(/function endIntro\(\)\{[^}]*show\("menu"\)/.test(game));ok(!(read("index.html")+game).toLowerCase().includes("not included"))});
 t("music loops through hold, rejection remembered and gesture retried",()=>{const html=read("index.html");ok(/<audio id="introMusic" src="assets\/intro-music\.mp3"[^>]*loop/.test(html));ok(/<video id="introVideo" src="assets\/intro\.mp4"[^>]*muted/.test(html));ok(/video\.play\(\)[\s\S]{0,200}retryMusic\(\)/.test(game));ok(/musicNeedsUnlock=true/.test(game));ok(/addEventListener\("pointerdown",retryMusic\)/.test(game))});
 t("visual viewport offset, size and scroll position all game controls",()=>{for(const term of ["vv.width","vv.height","vv.offsetLeft","vv.offsetTop",'addEventListener("scroll",resize)','$("bar").style.top','$("msg").style','$("hud").style'])ok(game.includes(term),term)});
 for(const name of ["arrow","egg","ice cream","hourglass","axe","umbrella","anchor"])t("an "+name,()=>ok(S.article(name)==="an"));
@@ -39,7 +39,7 @@ for(const name of ["ball","cube","house","heart","tower"])t("a "+name,()=>ok(S.a
 t("wooden eagle is volumetric and accepted",()=>{const bird=S.SHAPES.find(s=>s.name==="bird");ok(bird.mesh.f.length>500);ok(S.isCorrect(bird,"wooden eagle"));ok(S.isCorrect(bird,"eagle"))});
 t("cone and pyramid have distinct projected bases throughout animation",()=>{const c=S.SHAPES[2],p=S.SHAPES[4];for(const time of [0,1000,4000,8000]){const cv=S.displayPose(c,time),pv=S.displayPose(p,time);ok(Math.max(...cv.map(v=>v[1]))>0);ok(JSON.stringify(cv)!==JSON.stringify(pv))}});
 
-t("version bumped to build 5 with cache-busted changed scripts",()=>{ok(JSON.parse(read("version.json")).build==="5");const html=read("index.html");ok(html.includes('src="game.js?v=5"')&&html.includes('src="shapes.js?v=4"')&&html.includes('src="sfx.js?v=1"'))});
+t("version bumped to build 6 with cache-busted changed scripts",()=>{ok(JSON.parse(read("version.json")).build==="6");const html=read("index.html");ok(html.includes('src="game.js?v=6"')&&html.includes('src="shapes.js?v=5"')&&html.includes('src="sfx.js?v=2"'))});
 t("cave wall image unchanged",()=>ok(sha("assets/cave-wall.jpg")==="5916d37cdf7759752ae694807358018d06d7c99b0aebd9e0d1b1697491e315d0"));
 t("Skip clears the previous fallback timer before assigning a new one",()=>{const body=game.match(/function trySkip\(\)\{[\s\S]*?\n function|function trySkip\(\)\{[\s\S]*?resumeIntro\(\)\}\}/)[0];
  const iClear=body.indexOf("clearTimeout(seekTimer)"),iSet=body.indexOf("seekTimer=setTimeout");ok(iClear>=0&&iSet>iClear,"clear before set");
@@ -52,7 +52,7 @@ t("rapid Skips leave exactly one live fallback; remembered skip retries once see
   play(){this.paused=false;this.plays++;return Promise.resolve()},pause(){this.paused=true;this.pauses++},addEventListener(ev,f){(handlers[ev]=handlers[ev]||[]).push(f)},requestVideoFrameCallback(cb){cb(0,{mediaTime:this.currentTime})}};
  const music={play(){return Promise.resolve()},pause(){},volume:1,loop:true,currentTime:0};
  const sb={PlatoShapes:S,PlatoSfx:{unlock(){}},document:{getElementById:id=>id==="introVideo"?video:id==="introMusic"?music:(els[id]=els[id]||el())},
-  setTimeout:(f)=>{timers.set(++tid,f);return tid},clearTimeout:id=>timers.delete(id),requestAnimationFrame:f=>f(),Number,Math,Promise};
+  clearInterval(){},setTimeout:(f)=>{timers.set(++tid,f);return tid},clearTimeout:id=>timers.delete(id),requestAnimationFrame:f=>f(),Number,Math,Promise};
  const api=require("vm").runInNewContext(src+";({trySkip,startIntro,get s(){return {introState,skipPending,skipWanted,seekTimer}},toHold})",sb);
  const fire=ev=>(handlers[ev]||[]).forEach(f=>f());
  api.startIntro();video.paused=false;video.duration=25.36;video.seekable={length:1,end:()=>25.36};
@@ -100,6 +100,15 @@ t("legacy completeness does not depend on a future worker SHELL",()=>{const body
 t("downloads publish a validated staging cache and guard live targets",()=>{const body=read("sw.js").split("async function download")[1].split("async function cleanup")[0];ok(body.indexOf("cacheComplete(stage,build)")<body.indexOf("await caches.delete(PREFIX+build)"));ok(body.indexOf("inUse(m,build)")<body.indexOf("await caches.delete(PREFIX+build)"));ok(body.includes("keys:SHELL")&&body.includes("finally"))});
 t("SW update path keeps Shark pattern and adds session pins",()=>{const sw=read("sw.js");ok(/cache:"no-store"/.test(sw)&&/all-or-nothing/.test(sw)&&/silent/.test(sw)&&/m2\.pending=b/.test(sw));
  ok(/resultingClientId/.test(sw)&&/clients\.matchAll/.test(sw)&&/pins/.test(sw));ok(/c\.match\(r\.url\)\|\|await c\.match\(r\.url,\{ignoreSearch:true\}\)/.test(sw),"exact first")});
+t("endIntro routes to menu and never starts gameplay",()=>{const body=game.match(/function endIntro\(\)\{([^}]+)\}/)[1];ok(body.includes('show("menu")'));ok(!body.includes("startGame"))});
+t("level arrays preserve the complete ordered Easy set",()=>{const names="ball,cube,cone,cylinder,pyramid,donut,star,heart,diamond,moon,cross,arrow,egg,triangle prism,hexagon,house,tree,mushroom,snowman,lollipop,ice cream,bell,bottle,vase,cup,dumbbell,hourglass,candle,table,chair,ladder,key,hammer,sword,axe,umbrella,fish,bird,boat,car,rocket,lightning,crown,letter t,letter l,letter h,cloud,flower,tower,anchor";
+ ok(S.LEVELS.easy===S.SHAPES);ok(S.LEVELS.easy.map(s=>s.name).join(",")===names);for(const k of ["medium","hard"])ok(Array.isArray(S.LEVELS[k])&&S.LEVELS[k].length===0)});
+t("active level drives rounds, empty sets finish, replay keeps level",()=>{ok(game.includes("activeShapes=S.LEVELS[activeLevel]"));ok(game.includes("if(!activeShapes.length){endGame();return}"));ok(!game.includes("S.SHAPES[round]")&&!game.includes("S.SHAPES.length"));ok(game.includes('()=>startGame(activeLevel)'));for(const id of ["easyBtn","mediumBtn","hardBtn"])ok(read("index.html").includes('id="'+id+'"'))});
+t("volume defaults 100/100 and saved music level is restored after fade",()=>{const load=game.match(/function savedVolume[\s\S]*?return 1\}/)[0];const fn=new Function("localStorage",load+";return savedVolume('test')");ok(fn({getItem:()=>null})===1);ok(fn({getItem:()=>"35"})===.35);ok(fn({getItem:()=>"0"})===0);
+ ok(game.includes('musicVolume=savedVolume("platocave-music-vol")')&&game.includes('soundsVolume=savedVolume("platocave-sfx-vol")'));
+ const fade=game.split("function fadeMusic()")[1].split("function endIntro")[0];ok(fade.includes("const v0=musicVolume")&&fade.includes("music.volume=musicVolume")&&!fade.includes("music.volume=1"));ok(!game.includes("music.volume=1"));
+ const html=read("index.html");ok((html.match(/min="0" max="100" step="5" value="100"/g)||[]).length===2);ok(read("sfx.js").includes("0.5*volume")&&read("sfx.js").includes("0.32*volume"))});
+t("SW pending notifications do not reload or change promotion policy",()=>{const sw=read("sw.js");for(const term of ["postMessage","pending-ready","checking","current","failed","notifyPending"])ok(sw.includes(term));ok(!sw.includes("location.reload")&&!sw.includes(".navigate("));ok(game.includes('["start","menu","end"].includes(currentScreen)'));ok(!/location.reload/.test(game.split('addEventListener("message"')[1]||""));ok(sw.includes("if(nav)await switchIfPending(m)"))});
 // Execute the actual worker range routine, not a copied implementation.
 const vm=require("vm"),worker=read("sw.js"),ctx={self:{addEventListener(){}},Response,AbortController,setTimeout,clearTimeout};vm.createContext(ctx);vm.runInContext(worker,ctx);
 async function at(n,f){try{await f();pass++;console.log("PASS",n)}catch(e){fail++;console.log("FAIL",n,"-",e.message)}}
@@ -112,18 +121,18 @@ await at("offline seek from cached MP4 tail",async()=>{const bytes=fs.readFileSy
 await at("SW: open tab stays pinned to its build and keeps its cache; next launch takes pending; cache dropped after close",async()=>{
  const store=new Map(),deletions=[];let failStageWrite=false;const mk=(name)=>{const m=new Map();return {async match(u,o){const k=typeof u==="string"?new URL(u,"https://p.test/g/sw.js").href:u.url;if(m.has(k))return m.get(k).clone();if(o&&o.ignoreSearch){for(const [kk,v] of m)if(kk.split("?")[0]===k.split("?")[0])return v.clone()}},async keys(){return [...m.keys()].map(url=>({url}))},async put(u,r){if(failStageWrite&&name.includes("-staging-"))throw new Error("simulated storage failure");m.set(new URL(typeof u==="string"?u:u.url,"https://p.test/g/sw.js").href,r)}}};
  const caches={async open(n){if(!store.has(n))store.set(n,mk(n));return store.get(n)},async has(n){return store.has(n)},async delete(n){deletions.push(n);return store.delete(n)},async keys(){return [...store.keys()]}};
- let remote="2",open=new Set(),netCalls=0;const L={};
+ let remote="2",open=new Set(),netCalls=0;const L={},statuses=[];
  const SHELLf=read("sw.js").match(/const SHELL=(\[.*?\]);/)[1];
  const fetchF=async(req,o)=>{const u=typeof req==="string"?req:req.url;netCalls++;if(/version\.json/.test(u))return new Response(JSON.stringify({build:remote}));return new Response("build"+remote+":"+u.split("/").pop())};
  class Req{constructor(u,o){this.url=new URL(u,"https://p.test/g/").href;this.mode=(o&&o.mode)||"no-cors";this.method="GET";this.headers=new Map(Object.entries((o&&o.headers)||{}));this.headers.get=this.headers.get.bind(this.headers)}}
- const c2={self:{addEventListener:(n,f)=>L[n]=f,skipWaiting(){},clients:{async matchAll(){return [...open].map(id=>({id}))},async claim(){}}},caches,fetch:fetchF,Request:Req,Response,URL,AbortController,setTimeout,clearTimeout,location:{origin:"https://p.test"}};
+ const c2={self:{addEventListener:(n,f)=>L[n]=f,skipWaiting(){},clients:{async matchAll(){return [...open].map(id=>({id,postMessage:msg=>statuses.push(msg.status)}))},async claim(){}}},caches,fetch:fetchF,Request:Req,Response,URL,AbortController,setTimeout,clearTimeout,location:{origin:"https://p.test"}};
  c2.self.self=c2.self;vm.createContext(c2);vm.runInContext(read("sw.js"),c2);
  const ev=(extra)=>{const w=[];let resp;return {e:Object.assign({waitUntil:p=>w.push(p),respondWith:p=>resp=p},extra),done:async()=>{const r=await resp;await Promise.all(w);return r}}};
- const install=ev({});L.install(install.e);await install.done();const act=ev({});L.activate(act.e);await act.done();
+ const install=ev({});L.install(install.e);await install.done();const act=ev({});L.activate(act.e);await act.done();ok(!statuses.includes("pending-ready"),"first install has no update-ready notice");
  const get=async(url,clientId,nav,result)=>{const x=ev({request:new Req(url,{mode:nav?"navigate":"no-cors"}),clientId:clientId||"",resultingClientId:result||""});L.fetch(x.e);const r=await x.done();return r?await r.text():null};
- open.add("A");ok((await get("index.html",null,true,"A")).startsWith("build2"),"A launches build 2");
- remote="3";const chk=ev({data:"check"});L.message(chk.e);await chk.done();ok(store.has("platocave-v3"),"build 3 downloaded as pending");
- ok((await get("game.js?v=5","A")).startsWith("build2"),"A still served build 2 before any relaunch");
+ open.add("A");ok((await get("index.html",null,true,"A")).startsWith("build2"),"A launches build 2");ok(statuses.includes("current"),"current build status delivered");
+ remote="3";const chk=ev({data:"check"});L.message(chk.e);await chk.done();ok(store.has("platocave-v3"),"build 3 downloaded as pending");ok(statuses.includes("checking")&&statuses.includes("pending-ready"),"page notified only after completed pending download");
+ ok((await get("game.js?v=6","A")).startsWith("build2"),"A still served build 2 before any relaunch");
  open.add("B");ok((await get("index.html",null,true,"B")).startsWith("build3"),"new launch B takes pending build 3");
  ok(store.has("platocave-v2"),"old cache kept while A is open");ok((await get("assets/intro.mp4","A")).startsWith("build2"),"A never gets build-3 bytes");
  ok((await get("game.js?v=9","A")).startsWith("build2"),"ignoreSearch fallback stays inside A's pinned cache");
@@ -131,7 +140,7 @@ await at("SW: open tab stays pinned to its build and keeps its cache; next launc
  open.delete("A");open.add("C");await get("index.html",null,true,"C");ok(!store.has("platocave-v2"),"old cache deleted after A closed");
  // Simulate an older v2 worker's manifest-less cache and an unpinned already-playing window.
  open.clear();open.add("LEGACY");const legacy=await caches.open("platocave-v2");
- for(const u of JSON.parse(SHELLf))await legacy.put(u.replace(/([?]v=)[45]$/, "$12"),new Response("legacy2:"+u));
+ for(const u of JSON.parse(SHELLf))await legacy.put(u.replace(/([?]v=)\d+$/, "$12"),new Response("legacy2:"+u));
  await c2.setMeta({current:"2"});remote="4";
  const upgrade=ev({});L.install(upgrade.e);await upgrade.done();let meta=await c2.getMeta();
  ok(meta.current==="2"&&meta.pending==="4"&&meta.pins.LEGACY==="2","install pins legacy before pending promotion");
@@ -150,7 +159,7 @@ await at("SW: open tab stays pinned to its build and keeps its cache; next launc
  // Restore working build 3 so the pre-existing failure regression stays meaningful.
  remote="3";await c2.download("3");await c2.setMeta({current:"3"});open.clear();open.add("D");await c2.withMeta(c2.cleanup);
  remote="4";const before=[...store.keys()].sort().join();const bad=c2.fetch;c2.fetch=async(u)=>{if(/version/.test(typeof u==="string"?u:u.url))return new Response(JSON.stringify({build:"4"}));return new Response("x",{status:404})};
- const chk2=ev({data:"check"});L.message(chk2.e);await chk2.done();ok(!store.has("platocave-v4"),"broken update fails silently, all-or-nothing");
+ const chk2=ev({data:"check"});L.message(chk2.e);await chk2.done();ok(!store.has("platocave-v4"),"broken update fails silently, all-or-nothing");ok(statuses.includes("failed"),"page notified about failed update");
  ok((await get("index.html",null,true,"D")).startsWith("build3"),"still the working build")});
 console.log(pass+" passed, "+fail+" failed");process.exit(fail?1:0);
 })();
