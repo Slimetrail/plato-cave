@@ -1,0 +1,19 @@
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:#000;color:#f3e2c4;font-family:Georgia,"Times New Roman",serif;overflow:hidden;touch-action:manipulation;-webkit-user-select:none;user-select:none}
+.screen{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:24px}
+.screen.on{display:flex}
+#start,#end{background:radial-gradient(ellipse at 55% 40%,#5a3510 0%,#1c0f05 55%,#000 100%)}
+.big{font-size:clamp(34px,8vw,64px);text-shadow:0 2px 12px #000}.mid{font-size:clamp(24px,5vw,40px)}
+.btn{font:inherit;font-size:clamp(22px,4.5vw,30px);padding:14px 30px;border-radius:14px;border:2px solid #c79a54;background:#3a220c;color:#f8e8c8;cursor:pointer}
+.btn.dim{opacity:.8;font-size:clamp(18px,3.5vw,24px)}
+#intro{background:#000}#introVideo{width:100%;height:100%;object-fit:contain;background:#000}
+.skip{position:absolute;top:max(12px,env(safe-area-inset-top));right:14px;font:inherit;font-size:18px;padding:8px 16px;border-radius:10px;border:1px solid #8a6a3a;background:rgba(0,0,0,.4);color:#e9d6b0;opacity:.75}
+.tapHint{position:absolute;bottom:max(18px,env(safe-area-inset-bottom));left:0;right:0;text-align:center;font-size:20px;color:#d8c39b;opacity:0;transition:opacity 1.5s;pointer-events:none}
+.tapHint.on{opacity:.7;animation:pulse 2.4s infinite}@keyframes pulse{50%{opacity:.35}}
+#game{display:none;background:#000}#game.on{display:block}
+#cv{position:absolute;inset:0;width:100%;height:100%}
+#hud{position:absolute;top:max(10px,env(safe-area-inset-top));left:14px;right:14px;display:flex;justify-content:space-between;font-size:clamp(20px,4vw,28px);text-shadow:0 2px 6px #000}
+#msg{position:absolute;left:0;right:0;bottom:calc(96px + env(safe-area-inset-bottom));text-align:center;font-size:clamp(24px,5vw,36px);text-shadow:0 2px 8px #000,0 0 3px #000;pointer-events:none}
+#bar{position:absolute;left:0;right:0;bottom:0;display:flex;gap:10px;padding:12px 12px max(12px,env(safe-area-inset-bottom));background:linear-gradient(transparent,rgba(0,0,0,.85) 40%)}
+#guess{flex:1;min-width:0;font:inherit;font-size:clamp(22px,5vw,30px);padding:12px 16px;border-radius:12px;border:2px solid #c79a54;background:#1d1107;color:#fff3dc;-webkit-user-select:text;user-select:text}
+#nextBtn{display:none}
