@@ -32,25 +32,28 @@ t("quotes: every installed saying is an approved text",()=>{for(const q of Q.QUO
 t("quotes: every attribution names Plato (Republic)",()=>{for(const q of Q.QUOTES)ok(/Plato/.test(q.by)&&/Republic/.test(q.by),q.by)});
 t("quotes: no misattributed internet quotes anywhere in the game",()=>{const all=(read("quotes.js")+read("game.js")+read("index.html")).toLowerCase();for(const b of BANNED)ok(!all.includes(b),b)});
 t("quotes: pickForRound rotates and is deterministic",()=>{ok(Q.pickForRound(0)!==Q.pickForRound(1));ok(Q.pickForRound(3)===Q.pickForRound(3));ok(Q.pickForRound(15)===Q.pickForRound(0));for(let i=0;i<50;i++)ok(Q.QUOTES.includes(Q.pickForRound(i)))});
-t("quotes: shown per round in newRound, guess loop untouched",()=>{ok(/function newRound\(\)\{[\s\S]*?showQuote\(\)\}/.test(game));ok(/pickForRound\(round\)/.test(game));ok(!/function frame[^\n]*showQuote/.test(game))});
+t("quotes: hidden in guess, shown only after answer feedback",()=>{const n=game.split('function newRound()')[1].split('function showQuote()')[0],r=game.split('function submit()')[1].split('function next()')[0];ok(n.includes('$("quote").hidden=true')&&!n.includes('showQuote()'));ok(r.indexOf('showQuote()')>r.indexOf('PlatoSfx.wrong()'));ok(game.includes('pickForRound(round)'));ok(/<div id="game"[\s\S]*<figure id="quote"[\s\S]*<div id="end"/.test(read('index.html'))) });
 // Execute the real layout helper with viewport-relative DOM rects.
-function layoutHarness(W,H,quoteBottom=90,offset=0){const ctx={W,H,cv:{getBoundingClientRect:()=>({top:offset})},$:id=>({getBoundingClientRect:()=>id==="quote"?{bottom:offset+quoteBottom}:{top:offset+H-140}})};
+function layoutHarness(W,H,quoteBottom=90,offset=0,phase="reveal"){const ctx={W,H,phase,cv:{getBoundingClientRect:()=>({top:offset})},$:id=>({hidden:phase!=="reveal",getBoundingClientRect:()=>id==="quote"?{bottom:offset+quoteBottom}:id==="hud"?{bottom:offset+42}:{top:offset+H-140}})};
  require("vm").createContext(ctx);require("vm").runInContext(game.slice(game.indexOf("function fitLandscape("),game.indexOf("function drawShadow(")),ctx);return ctx.fitLandscape}
-t("landscape art clears full quote and message for all 150 meshes / five poses",()=>{
- for(const [W,H] of [[800,400],[1280,800]])for(const bottom of [65,90,110]){
+t("reveal art clears full larger quote and message for all 150 meshes / five poses",()=>{
+ for(const [W,H] of [[800,400],[1280,800],[390,844]])for(const bottom of [90,130,180]){
  const fit=layoutHarness(W,H,bottom,140);
  for(const shape of Object.values(S.LEVELS).flat())for(const time of [0,1000,4000,8000,20000]){
  const v=S.displayPose(shape,time),shadow=S.castShadow(v,shape.mesh.f,[.15,-.35,5.2]).points;
  for(const [p,scale,cy] of [[shadow,Math.min(W,H-120)/5.6,(H-90)/2],[v.map(p=>[p[0]*7/(7-p[2]),p[1]*7/(7-p[2])]),Math.min(W,H-150)*.27,(H-150)/2+20]]){
  const a=fit(p,scale,cy);ok(a.scale<=scale&&a.scale>=0);for(const q of p){const y=a.cy-q[1]*a.scale;ok(y>=bottom+24-1e-6&&y<=H-152+1e-6,shape.name+" "+W+"x"+H+" y="+y)}
  }}}});
-t("portrait retains exact original art scale and center",()=>{for(const [W,H] of [[390,844],[400,380+400]]){const fit=layoutHarness(W,H);for(const [scale,cy] of [[52,377],[100,367]]){const a=fit([[0,-10],[0,10]],scale,cy);ok(a.scale===scale&&a.cy===cy)}}});
-t("quote is never height-clipped and both drawing paths use landscape reserve",()=>{ok(game.includes('maxHeight:"none",overflow:"visible"'));ok(game.includes('layout=fitLandscape(s.points,wallScale()'));ok(game.includes('layout=fitLandscape(v.map('));ok(read("style.css").includes('@media (orientation:landscape)'))});
+t("landscape guess uses HUD without reserving any hidden saying band",()=>{for(const [W,H] of [[800,400],[1280,800]]){const a=layoutHarness(W,H,0,0,"guess")([[0,-2],[0,2]],100,100),b=layoutHarness(W,H,250,0,"guess")([[0,-2],[0,2]],100,100);ok(a.scale===b.scale&&a.cy===b.cy);ok(a.cy-2*a.scale>=42+24-1e-6)}});
+t("portrait guess retains exact original art scale and center",()=>{for(const [W,H] of [[390,844],[400,780]]){const fit=layoutHarness(W,H,0,0,"guess");for(const [scale,cy] of [[52,377],[100,367]]){const a=fit([[0,-10],[0,10]],scale,cy);ok(a.scale===scale&&a.cy===cy)}}});
+t("quote is larger, never height-clipped and both drawing paths reserve it on reveal",()=>{ok(game.includes('maxHeight:"none",overflow:"visible"'));ok(game.includes('layout=fitLandscape(s.points,wallScale()'));ok(game.includes('layout=fitLandscape(v.map('));const css=read("style.css");ok(css.includes('clamp(20px,5vw,26px)')&&css.includes('clamp(20px,2.2vw,28px)'));ok(!/#quote[^}]*overflow:hidden/.test(css))});
+t("reveal Menu is separate from end Menu and Next still advances",()=>{const html=read('index.html');ok(html.includes('id="revealMenuBtn" class="btn" type="button" hidden>Menu'));ok(game.includes('$("revealMenuBtn").hidden=true')&&game.includes('$("revealMenuBtn").hidden=false'));ok(game.includes('$("revealMenuBtn").addEventListener("click",()=>show("menu"))'));ok(game.includes('$("nextBtn").addEventListener("click",next)'));ok(game.includes('round++;if(round>=activeShapes.length){endGame()}else newRound()'))});
+t("quotes, shapes and SFX are byte-identical to locked build 9",()=>{for(const [f,h] of Object.entries({'quotes.js':'432a16ebe9d8c62c308ab379013d934c1c6052fac308efd32eebf2b0cca753da','shapes.js':'d945ccacfa0ed8942ea5dce6fb3a6a4544bdf6e8c8bf6024dd51fcbd97d46405','sfx.js':'e8d33e5ba96fe7703dba21e46f47da19b63d76d8e81644c3eb001bb3a609cfa9'}))ok(sha(f)===h,f)});
 t("levels still 50/50/50 and cave wall lock",()=>{ok(S.LEVELS.easy.length===50&&S.LEVELS.medium.length===50&&S.LEVELS.hard.length===50);ok(sha("assets/cave-wall.jpg")==="5916d37cdf7759752ae694807358018d06d7c99b0aebd9e0d1b1697491e315d0")});
 t("scoring: +100 on correct, no points + original SFX on wrong",()=>{ok(/if\(ok\)\{score\+=100/.test(game));ok(/else\{PlatoSfx\.wrong\(\)/.test(game));const sfx=read("sfx.js");ok(/createOscillator/.test(sfx)&&!/\.(mp3|wav|ogg)/.test(sfx),"sfx must be synthesized")});
 t("no ads / trackers / CDN",()=>{for(const f of ["index.html","game.js","shapes.js","sfx.js","sw.js","style.css","manifest.webmanifest"]){const s=read(f).toLowerCase();for(const bad of ["adsbygoogle","adsense","doubleclick","googletagmanager","google-analytics","gtag(","admob","applovin","unityads","facebook.net","cdn.","https://","http://"])ok(!s.includes(bad),f+" has "+bad)}});
 t("service worker caches every bundled asset and they exist",()=>{const sw=read("sw.js");const list=JSON.parse(sw.match(/const SHELL=(\[.*?\]);/)[1]);
- for(const a of ["assets/intro.mp4","assets/intro-music.mp3","assets/cave-wall.jpg","game.js?v=9","quotes.js?v=1","shapes.js?v=6","sfx.js?v=2","style.css?v=5","index.html"])ok(list.includes(a),a);
+ for(const a of ["assets/intro.mp4","assets/intro-music.mp3","assets/cave-wall.jpg","game.js?v=10","quotes.js?v=1","shapes.js?v=6","sfx.js?v=2","style.css?v=6","index.html"])ok(list.includes(a),a);
  for(const a of list)if(a!=="./")ok(fs.existsSync(path.join(R,a.split("?")[0])),"missing "+a);const html=read("index.html");for(const m of html.matchAll(/(?:src|href)="([^"]+)"/g))ok(list.includes(m[1])||m[1].startsWith("icons/")&&list.includes(m[1])||m[1]==="manifest.webmanifest","uncached "+m[1])});
 t("update path: version.json never cached, pending build, silent fail",()=>{const sw=read("sw.js");ok(/cache:"no-store"/.test(sw));ok(!/"version\.json"\s*[,\]]/.test(sw.match(/const SHELL=(\[.*?\]);/)[1]));ok(/pending/.test(sw)&&/silent/.test(sw));ok(JSON.parse(read("version.json")).build)});
 t("manifest standalone/fullscreen",()=>{const m=JSON.parse(read("manifest.webmanifest"));ok(m.display==="fullscreen"&&m.display_override.includes("standalone"))});
@@ -62,7 +65,7 @@ for(const name of ["ball","cube","house","heart","tower"])t("a "+name,()=>ok(S.a
 t("wooden eagle is volumetric and accepted",()=>{const bird=S.SHAPES.find(s=>s.name==="bird");ok(bird.mesh.f.length>500);ok(S.isCorrect(bird,"wooden eagle"));ok(S.isCorrect(bird,"eagle"))});
 t("cone and pyramid have distinct projected bases throughout animation",()=>{const c=S.SHAPES[2],p=S.SHAPES[4];for(const time of [0,1000,4000,8000]){const cv=S.displayPose(c,time),pv=S.displayPose(p,time);ok(Math.max(...cv.map(v=>v[1]))>0);ok(JSON.stringify(cv)!==JSON.stringify(pv))}});
 
-t("version bumped to build 9 with cache-busted changed scripts",()=>{ok(JSON.parse(read("version.json")).build==="9");const html=read("index.html");ok(html.includes('src="quotes.js?v=1"')&&html.includes('href="style.css?v=5"')&&html.indexOf("quotes.js")<html.indexOf("game.js")&&html.includes('src="game.js?v=9"')&&html.includes('src="shapes.js?v=6"')&&html.includes('src="sfx.js?v=2"'))});
+t("version bumped to build 10 with cache-busted changed scripts",()=>{ok(JSON.parse(read("version.json")).build==="10");const html=read("index.html");ok(html.includes('src="quotes.js?v=1"')&&html.includes('href="style.css?v=6"')&&html.indexOf("quotes.js")<html.indexOf("game.js")&&html.includes('src="game.js?v=10"')&&html.includes('src="shapes.js?v=6"')&&html.includes('src="sfx.js?v=2"'))});
 t("cave wall image unchanged",()=>ok(sha("assets/cave-wall.jpg")==="5916d37cdf7759752ae694807358018d06d7c99b0aebd9e0d1b1697491e315d0"));
 t("Skip clears the previous fallback timer before assigning a new one",()=>{const body=game.match(/function trySkip\(\)\{[\s\S]*?\n function|function trySkip\(\)\{[\s\S]*?resumeIntro\(\)\}\}/)[0];
  const iClear=body.indexOf("clearTimeout(seekTimer)"),iSet=body.indexOf("seekTimer=setTimeout");ok(iClear>=0&&iSet>iClear,"clear before set");
@@ -182,10 +185,10 @@ await at("SW: open tab stays pinned to its build and keeps its cache; next launc
  const get=async(url,clientId,nav,result)=>{const x=ev({request:new Req(url,{mode:nav?"navigate":"no-cors"}),clientId:clientId||"",resultingClientId:result||""});L.fetch(x.e);const r=await x.done();return r?await r.text():null};
  open.add("A");ok((await get("index.html",null,true,"A")).startsWith("build2"),"A launches build 2");ok(statuses.includes("current"),"current build status delivered");
  remote="3";const chk=ev({data:"check"});L.message(chk.e);await chk.done();ok(store.has("platocave-v3"),"build 3 downloaded as pending");ok(statuses.includes("checking")&&statuses.includes("pending-ready"),"page notified only after completed pending download");
- ok((await get("game.js?v=9","A")).startsWith("build2"),"A still served build 2 before any relaunch");
+ ok((await get("game.js?v=10","A")).startsWith("build2"),"A still served build 2 before any relaunch");
  open.add("B");ok((await get("index.html",null,true,"B")).startsWith("build3"),"new launch B takes pending build 3");
  ok(store.has("platocave-v2"),"old cache kept while A is open");ok((await get("assets/intro.mp4","A")).startsWith("build2"),"A never gets build-3 bytes");
- ok((await get("game.js?v=10","A")).startsWith("build2"),"ignoreSearch fallback stays inside A's pinned cache");
+ ok((await get("game.js?v=11","A")).startsWith("build2"),"ignoreSearch fallback stays inside A's pinned cache");
  ok((await get("assets/intro.mp4","B")).startsWith("build3"),"B on build 3");
  open.delete("A");open.add("C");await get("index.html",null,true,"C");ok(!store.has("platocave-v2"),"old cache deleted after A closed");
  // Simulate an older v2 worker's manifest-less cache and an unpinned already-playing window.

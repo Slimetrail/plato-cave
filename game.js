@@ -108,9 +108,9 @@ function resize(){DPR=Math.min(2,window.devicePixelRatio||1);const vv=window.vis
 addEventListener("resize",resize);if(window.visualViewport){visualViewport.addEventListener("resize",resize);visualViewport.addEventListener("scroll",resize)}resize();
 function startGame(level=activeLevel){activeLevel=Object.hasOwn(S.LEVELS,level)?level:"easy";activeShapes=S.LEVELS[activeLevel];round=0;score=0;if(!activeShapes.length){endGame();return}show("game");resize();newRound()}
 function endGame(){phase="end";$("endScore").textContent="Score "+score+"  ("+(score/100)+" of "+activeShapes.length+" right)";show("end")}
-function newRound(){phase="guess";t0=performance.now();$("guess").value="";$("guess").disabled=false;$("goBtn").style.display="";$("nextBtn").style.display="none";$("msg").textContent="What makes this shadow?";
- $("roundTxt").textContent=(round+1)+" / "+activeShapes.length;$("scoreTxt").textContent="Score "+score;showQuote()}
-// t2067u: one genuine Plato saying per round (rotates by round index), visible during guess and reveal; hidden off the game screen with #game.
+function newRound(){phase="guess";t0=performance.now();$("guess").value="";$("guess").disabled=false;$("goBtn").style.display="";$("nextBtn").style.display="none";$("revealMenuBtn").hidden=true;$("quote").hidden=true;$("msg").textContent="What makes this shadow?";
+ $("roundTxt").textContent=(round+1)+" / "+activeShapes.length;$("scoreTxt").textContent="Score "+score;resize()}
+// One genuine Plato saying per round, revealed with the answer; contained by #game.
 function showQuote(){const Q=self.PlatoQuotes,q=$("quote");if(!Q||!q)return;const s=Q.pickForRound(round);$("quoteText").textContent=s.text;$("quoteBy").textContent="\u2014 "+s.by;q.hidden=false}
 function flicker(t){return Math.sin(t*0.0071)*0.5+Math.sin(t*0.0173+1)*0.3+Math.sin(t*0.031+2)*0.2}
 function poseOf(shape,t){return S.displayPose(shape,t)}
@@ -119,13 +119,15 @@ function drawWall(t){const f=flicker(t);g.fillStyle="#000";g.fillRect(0,0,W,H);
  if(wall.complete&&wall.naturalWidth){const s=Math.max(W/wall.naturalWidth,H/wall.naturalHeight);const w=wall.naturalWidth*s,h=wall.naturalHeight*s;g.globalAlpha=0.9+f*0.08;g.drawImage(wall,(W-w)/2,(H-h)/2,w,h);g.globalAlpha=1}
  const gr=g.createRadialGradient(W*0.5,H*0.95,0,W*0.5,H*0.6,radius(Math.max(W,H)*0.8));gr.addColorStop(0,"rgba(255,150,50,"+(0.16+f*0.05)+")");gr.addColorStop(1,"rgba(0,0,0,0)");g.fillStyle=gr;g.fillRect(0,0,W,H)}
 function wallScale(){return Math.max(0,Math.min(W,H-120))/5.6}
-// Landscape only: fit already-projected art between the full quote and message.
-// Reserve 24px above (including the soft shadow edge) and 12px below. Portrait
-// keeps its original scale/center; no clipping, mesh, light or material changes.
+// Guess landscape uses the HUD, never the hidden quote's zero rect. Reveal
+// reserves the full wrapped saying + gold attribution in either orientation.
+// Only scale/center change; projected geometry, lighting and materials stay locked.
 function fitLandscape(points,scale,cy){
- if(W<=H)return {scale,cy};
- const origin=cv.getBoundingClientRect().top,q=$("quote").getBoundingClientRect();
- const top=q.bottom-origin+24,bottom=$("msg").getBoundingClientRect().top-origin-12;
+ const revealing=phase==="reveal"&&!$("quote").hidden;
+ if(W<=H&&!revealing)return {scale,cy};
+ const origin=cv.getBoundingClientRect().top;
+ const top=(revealing?$("quote"):$("hud")).getBoundingClientRect().bottom-origin+24;
+ const bottom=$("msg").getBoundingClientRect().top-origin-12;
  let lo=Infinity,hi=-Infinity;for(const p of points){lo=Math.min(lo,p[1]);hi=Math.max(hi,p[1])}
  scale=Math.min(scale,Math.max(0,bottom-top)/Math.max(0.001,hi-lo));
  cy=Math.max(top+hi*scale,Math.min(cy,bottom+lo*scale));
@@ -237,10 +239,11 @@ requestAnimationFrame(frame);
 function submit(){if(phase!=="guess")return;const text=$("guess").value;if(!S.norm(text)){$("msg").textContent="Type a word first.";$("guess").focus();return}
  const sp=activeShapes[round],ok=S.isCorrect(sp,text);lastResult=ok;phase="reveal";revealAt=performance.now();$("guess").disabled=true;$("guess").blur();
  if(ok){score+=100;$("msg").textContent="Yes! "+S.article(sp.name).replace(/^./,c=>c.toUpperCase())+" "+sp.name+". +100"}else{PlatoSfx.wrong();$("msg").textContent="No! It was "+S.article(sp.name)+" "+sp.name+"."}
- $("scoreTxt").textContent="Score "+score;$("goBtn").style.display="none";$("nextBtn").style.display="block"}
+ $("scoreTxt").textContent="Score "+score;$("goBtn").style.display="none";$("nextBtn").style.display="block";$("revealMenuBtn").hidden=false;showQuote();resize()}
 function next(){if(phase!=="reveal")return;round++;if(round>=activeShapes.length){endGame()}else newRound()}
 $("bar").addEventListener("submit",e=>{e.preventDefault();if(phase==="guess")submit();else next()});
 $("nextBtn").addEventListener("click",next);
+$("revealMenuBtn").addEventListener("click",()=>show("menu"));
 $("againBtn").addEventListener("click",()=>startGame(activeLevel));$("rewatchBtn").addEventListener("click",startIntro);
 // testing hook (no answers exposed beyond the shape list already in shapes.js)
 self.__plato={get state(){return {introState,titleReady,musicNeedsUnlock,skipPending,skipWanted,round,score,phase,lastResult,activeLevel,total:activeShapes.length,currentScreen,musicVolume,soundsVolume,pendingReady}},submit:t=>{$("guess").value=t;submit()},next};
