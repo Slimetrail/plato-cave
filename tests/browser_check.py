@@ -3,7 +3,7 @@ import asyncio,sys,os,json
 from pathlib import Path
 from playwright.async_api import async_playwright
 U=os.environ.get('PLATO_URL','http://127.0.0.1:19543/')
-OUT=Path('/workspace/plato-cave/game-export/t2060u-menu-settings');OUT.mkdir(parents=True,exist_ok=True)
+OUT=Path('/workspace/plato-cave/game-export/t2060u-medium-hard/browser-build7');OUT.mkdir(parents=True,exist_ok=True)
 async def main():
   res=[]
   def ok(n,c):res.append((n,bool(c)));print('PASS' if c else 'FAIL',n,flush=True)
@@ -113,9 +113,9 @@ async def main():
     # New UI behavior on real pages; all networking remains on the local test server.
     await pg.reload();await pg.evaluate('show("menu")')
     ok('menu exposes three levels',all([await pg.is_visible('#'+k+'Btn') for k in ['easy','medium','hard']]))
-    await pg.click('#mediumBtn');ok('empty Medium safely ends 0 of 0',await pg.is_visible('#end') and '0 of 0' in await pg.inner_text('#endScore'))
-    await pg.click('#againBtn');ok('Play again keeps Medium',await pg.evaluate('__plato.state.activeLevel==="medium"&&__plato.state.total===0'))
-    await pg.click('#menuBtn');await pg.click('#hardBtn');ok('empty Hard safely ends',await pg.evaluate('__plato.state.activeLevel==="hard"&&__plato.state.phase==="end"'))
+    await pg.click('#mediumBtn');ok('Medium starts 50-shape guess loop',await pg.is_visible('#game') and await pg.evaluate('__plato.state.activeLevel==="medium"&&__plato.state.total===50'));await pg.fill('#guess','pear');await pg.click('#goBtn');ok('Medium correct guess scores 100',await pg.evaluate('__plato.state.score===100'));await pg.evaluate('endGame()')
+    await pg.click('#againBtn');ok('Play again keeps Medium',await pg.evaluate('__plato.state.activeLevel==="medium"&&__plato.state.total===50&&__plato.state.score===0'));await pg.evaluate('endGame()')
+    await pg.click('#menuBtn');await pg.click('#hardBtn');ok('Hard starts 50-shape guess loop',await pg.evaluate('__plato.state.activeLevel==="hard"&&__plato.state.total===50&&__plato.state.phase==="guess"'));await pg.fill('#guess','washer');await pg.click('#goBtn');ok('Hard correct guess scores 100',await pg.evaluate('__plato.state.score===100'));await pg.evaluate('endGame()')
     await pg.click('#endSettingsBtn');await pg.eval_on_selector('#musicVol',"e=>{e.value=35;e.dispatchEvent(new Event('input'))}")
     await pg.eval_on_selector('#soundsVol',"e=>{e.value=0;e.dispatchEvent(new Event('input'))}")
     await pg.click('#settingsDoneBtn');ok('settings Done returns to End',await pg.is_visible('#end'))
@@ -137,7 +137,7 @@ async def main():
       fits=await pg.evaluate("[...document.querySelectorAll('#menu button')].filter(e=>e.offsetParent).every(e=>{const r=e.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth})")
       ok(f'menu buttons fit {w}x{h}',fits);ok(f'install hint does not overlap update {w}x{h}',await pg.evaluate('document.getElementById("menuInstallHint").getBoundingClientRect().bottom<=document.getElementById("updateBtn").getBoundingClientRect().top') if h>w else True);await pg.screenshot(path=str(OUT/f'menu-{w}x{h}.png'))
     await pg.set_viewport_size({'width':1280,'height':800})
-    keys=await pg.evaluate('caches.keys()');ok('build 6 cache installed', 'platocave-v6' in keys)
+    keys=await pg.evaluate('caches.keys()');ok('build 7 cache installed', 'platocave-v7' in keys)
     await c.set_offline(True);await pg.reload();await pg.wait_for_timeout(500);ok('works offline after first load',await pg.is_visible('#startBtn'))
     rr=await pg.evaluate('''async()=>{const r=await fetch('assets/intro.mp4',{headers:{range:'bytes=-4096'}});return {s:r.status,cr:r.headers.get('content-range'),size:(await r.arrayBuffer()).byteLength}}''')
     ok('offline seek byte range served from cached video',rr['s']==206 and rr['size']==4096 and rr['cr'].startswith('bytes '))
@@ -150,21 +150,21 @@ async def main():
     upgrade_ctx=await b.new_context();old=await upgrade_ctx.new_page();await old.goto(U)
     await old.evaluate('navigator.serviceWorker.ready');await old.reload();await old.wait_for_function('!!navigator.serviceWorker.controller')
     await old.evaluate('''async()=>{
-      const src=await caches.open('platocave-v6'),dst=await caches.open('platocave-v2');
+      const src=await caches.open('platocave-v7'),dst=await caches.open('platocave-v2');
       for(const req of await src.keys()){if(req.url.endsWith('__build_manifest__'))continue;
         const url=req.url.replace(/([?]v=)[0-9]+$/,(_,a)=>a+'2');await dst.put(url,await src.match(req))}
       const meta=await caches.open('platocave-vmeta');await meta.put('meta',new Response(JSON.stringify({current:'2'})));
       await navigator.serviceWorker.register('sw.js?r3-upgrade',{scope:'./'});
     }''')
-    await old.wait_for_function('''async()=>{const c=await caches.open('platocave-vmeta'),r=await c.match('meta'),m=await r.json();return m.current==='2'&&m.pending==='6'&&Object.values(m.pins||{}).includes('2')}''')
+    await old.wait_for_function('''async()=>{const c=await caches.open('platocave-vmeta'),r=await c.match('meta'),m=await r.json();return m.current==='2'&&m.pending==='7'&&Object.values(m.pins||{}).includes('2')}''')
     await old.wait_for_function('navigator.serviceWorker.controller.scriptURL.includes("r3-upgrade")')
     migration=await old.evaluate('''async()=>{const m=await (await (await caches.open('platocave-vmeta')).match('meta')).json();return {m,keys:await caches.keys()}}''')
-    ok('actual install pins unpinned legacy tab before claim; build 6 pending',migration['m']['current']=='2' and migration['m']['pending']=='6' and 'platocave-v2' in migration['keys'])
+    ok('actual install pins unpinned legacy tab before claim; build 7 pending',migration['m']['current']=='2' and migration['m']['pending']=='7' and 'platocave-v2' in migration['keys'])
     text=await old.evaluate('fetch("game.js?v=2").then(r=>r.text())')
     ok('legacy client still reads its v2 script key', 'const TITLE_TIME=23.0' in text)
     new=await upgrade_ctx.new_page();await new.goto(U);await new.wait_for_function('!!navigator.serviceWorker.controller')
     migration=await new.evaluate('''async()=>({m:await (await (await caches.open('platocave-vmeta')).match('meta')).json(),keys:await caches.keys()})''')
-    ok('actual next launch promotes 6 but retains old live cache',migration['m']['current']=='6' and 'platocave-v2' in migration['keys'] and '2' in migration['m']['pins'].values())
+    ok('actual next launch promotes 7 but retains old live cache',migration['m']['current']=='7' and 'platocave-v2' in migration['keys'] and '2' in migration['m']['pins'].values())
     await old.close();await new.reload()
     await new.wait_for_function('caches.keys().then(k=>!k.includes("platocave-v2"))')
     ok('actual cleanup reclaims legacy cache only after window closes',True)

@@ -93,7 +93,7 @@ const OBJ_MATS={ball:["clay"],cube:["limestone"],cone:["traffic"],cylinder:["cop
  table:["wood"],chair:["wood"],ladder:["wood"],key:["gold"],hammer:["steel","wood"],sword:["steel"],axe:["steel","wood"],umbrella:["indigo","wood"],fish:["fish"],bird:["wood"],
  boat:["wood","sail"],car:["lacquer"],rocket:["steel"],lightning:["ochre"],crown:["gold"],"letter t":["stone"],"letter l":["terracotta"],"letter h":["moonstone"],cloud:["snow"],
  flower:["ruby","pollen","leaf"],tower:["masonry"],anchor:["steel"]};
-function matsFor(shape){return (OBJ_MATS[shape.name]||["clay"]).map(k=>MATS[k])}
+function matsFor(shape){return (OBJ_MATS[shape.name]||S.LEVEL_MATERIALS[shape.name]||["clay"]).map(k=>MATS[k])}
 let round=0,score=0,phase="guess",t0=performance.now(),revealAt=0,lastResult=null,W=0,H=0,DPR=1;
 function resize(){DPR=Math.min(2,window.devicePixelRatio||1);const vv=window.visualViewport;
  W=vv?vv.width:innerWidth;H=vv?vv.height:innerHeight;const x=vv?vv.offsetLeft:0,y=vv?vv.offsetTop:0;
