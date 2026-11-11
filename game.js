@@ -288,3 +288,5 @@ $("updateBtn").addEventListener("click",()=>{if(currentScreen!=="menu")return;if
 if("serviceWorker" in navigator&&location.protocol!=="file:"){
  navigator.serviceWorker.addEventListener("message",e=>{if(e.data&&e.data.type==="plato-update")updateStatus(e.data.status)});
  navigator.serviceWorker.register("sw.js").then(()=>navigator.serviceWorker.ready).then(r=>{swRegistration=r;if(navigator.onLine&&r.active)r.active.postMessage("check")}).catch(()=>{})}
+/* t2569u SlimeTrail logo splash: the splash tap is the real gesture; when the logo fades, press Start for the player so one tap starts the game */
+if(window.SlimeSplash)SlimeSplash.whenDone(()=>{if(currentScreen==="start")$("startBtn").click()});
